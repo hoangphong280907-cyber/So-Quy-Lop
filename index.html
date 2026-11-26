@@ -412,9 +412,21 @@ function setMemberPaidStatus(memberId, shouldPay, options = {}) {
   const autoTxId = `fund_${today}_${memberId}`;
 
   if (shouldPay) {
+    const prevLogs = DB.paymentLogs.filter(x => x.memberId === memberId && x.date !== today);
+    let shouldAddTx = true;
+    if (prevLogs.length > 0 && !options.skipConfirm) {
+      const lastLog = prevLogs[0];
+      const addMoney = confirm(
+        `${m.name} đã từng đóng quỹ (${fmtMoney(lastLog.amount || 0)} lúc ${lastLog.paidAtStr || lastLog.date}).\n\n` +
+        `• Bấm OK: Đánh dấu đã đóng hôm nay VÀ cộng thêm ${fmtMoney(DB.settings?.termFee || 0)} vào Tài khoản.\n` +
+        `• Bấm Hủy: Chỉ đánh dấu đã đóng hôm nay (không cộng trùng tiền vào Tài khoản).`
+      );
+      shouldAddTx = addMoney;
+    }
+
     const now = Date.now();
     const paidAtStr = formatExactDateTime(now);
-    const fee = Math.max(0, Math.round(Number(DB.settings?.termFee) || 0));
+    const fee = shouldAddTx ? Math.max(0, Math.round(Number(DB.settings?.termFee) || 0)) : 0;
     DB.memberPaid[memberId] = {
       paid: true,
       date: today,
@@ -465,7 +477,7 @@ function setMemberPaidStatus(memberId, shouldPay, options = {}) {
         toast(`✓ ${m.name} đã đóng lúc ${paidAtStr}`, 'var(--income)');
       }
     } else if (!options.silent) {
-      toast(`✓ ${m.name} đã đóng lúc ${paidAtStr}`, 'var(--income)');
+      toast(`✓ Đã đánh dấu ${m.name} đóng lúc ${paidAtStr} (không cộng trùng tiền)`, 'var(--income)');
     }
   } else {
     delete DB.memberPaid[memberId];
