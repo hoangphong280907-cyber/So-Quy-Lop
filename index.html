@@ -290,7 +290,72 @@ function buildVietQrUrl({ bankCode, accountNo, accountName, amount, customMemo }
   return `https://img.vietqr.io/image/${bank}-${stk}-compact2.png?amount=${money}&addInfo=${memo}&accountName=${holder}`;
 }
 
-function openMemberQr(memberName, amount) {
+function reportMemberTransfer(memberId) {
+  if (!DB || !memberId) return;
+  const m = DB.members.find(x => x.id === memberId);
+  if (!m) return;
+  if (DB.memberPaid[memberId]) {
+    toast(`${m.name} đã được xác nhận đóng quỹ rồi`, 'var(--income)');
+    return;
+  }
+  DB.memberPending = DB.memberPending && typeof DB.memberPending === 'object' ? DB.memberPending : {};
+  DB.memberPending[memberId] = Date.now();
+  saveDB();
+  toast(`Đã gửi báo chuyển khoản cho ${m.name} — chờ thủ quỹ duyệt`, 'var(--income)');
+  if ($('#sheetOverlay')?.classList.contains('open')) renderMembersSheet();
+  if (currentView === 'home') render();
+}
+
+function setMemberPaidStatus(memberId, shouldPay, options = {}) {
+  const m = DB.members.find(x => x.id === memberId);
+  if (!m) return;
+  DB.memberPending = DB.memberPending && typeof DB.memberPending === 'object' ? DB.memberPending : {};
+  const autoTxId = `fund_${memberId}`;
+
+  if (shouldPay) {
+    DB.memberPaid[memberId] = true;
+    delete DB.memberPending[memberId];
+    const fee = Math.max(0, Math.round(Number(DB.settings?.termFee) || 0));
+    if (fee > 0) {
+      const existingIdx = DB.transactions.findIndex(t => t.id === autoTxId);
+      const txObj = {
+        id: autoTxId,
+        type: 'in',
+        amount: fee,
+        category: 'quy',
+        categoryName: 'Quỹ lớp',
+        account: 'bank',
+        date: todayISO(),
+        member: m.name,
+        note: `Thu quỹ lớp · ${m.name}`,
+        receipt: null,
+        status: 'done',
+        createdAt: Date.now()
+      };
+      if (existingIdx >= 0) {
+        DB.transactions[existingIdx] = { ...DB.transactions[existingIdx], ...txObj, createdAt: DB.transactions[existingIdx].createdAt };
+      } else {
+        DB.transactions.push(txObj);
+      }
+      if (!options.silent) {
+        toast(`✓ ${m.name} đã đóng (+${fmtMoney(fee)} vào Tài khoản)`, 'var(--income)');
+      }
+    } else if (!options.silent) {
+      toast(`✓ Đã đánh dấu ${m.name} đã đóng`, 'var(--income)');
+    }
+  } else {
+    delete DB.memberPaid[memberId];
+    const beforeLen = DB.transactions.length;
+    DB.transactions = DB.transactions.filter(t => t.id !== autoTxId);
+    if (!options.silent) {
+      toast(DB.transactions.length < beforeLen
+        ? `Đã hoàn tác ${m.name} & trừ khoản thu khỏi Tài khoản`
+        : `Đã chuyển ${m.name} về Chưa đóng`);
+    }
+  }
+}
+
+function openMemberQr(memberName, amount, memberId = null) {
   const bankCfg = DB?.settings?.bank || {};
   const amtNum = Math.max(0, Math.round(Number(amount ?? DB?.settings?.termFee ?? 0)));
   const initialMemo = formatTransferMemo(
@@ -307,10 +372,19 @@ function openMemberQr(memberName, amount) {
 
   const modal = $('#qrModal');
   const box = $('#qrBox');
+  const isPaid = memberId ? !!DB?.memberPaid?.[memberId] : false;
+  const isPending = memberId ? !!DB?.memberPending?.[memberId] : false;
+
+  const reportBtnHtml = (memberId && !isPaid) ? `
+    <button id="qrReportPaidBtn" class="press w-full rounded-xl border border-[var(--income)] bg-[var(--accent-soft)] py-2.5 text-[13px] font-semibold text-[var(--income)]">
+      ${isPending ? '⏳ Đã báo chuyển khoản (Gửi lại)' : '💸 Tôi đã chuyển khoản'}
+    </button>` : '';
+
   if (!url) {
     box.innerHTML = `
       <h3 class="text-[17px] font-bold">Chưa cấu hình tài khoản nhận quỹ</h3>
       <p class="text-[13px] text-[var(--text-2)]">Vào mục <b>Cài đặt → Tài khoản nhận quỹ (VietQR)</b> để nhập ngân hàng (BIDV, VCB, MB...) và số tài khoản.</p>
+      ${reportBtnHtml}
       <button id="qrCloseBtn" class="press w-full rounded-xl bg-[var(--accent)] py-2.5 text-[14px] font-semibold text-[var(--on-accent)]">Đóng</button>
     `;
   } else {
@@ -327,6 +401,7 @@ function openMemberQr(memberName, amount) {
           placeholder="Để trống nếu muốn người nộp tự nhập"
           class="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[13px] uppercase outline-none" />
       </div>
+      ${reportBtnHtml}
       <button id="qrCloseBtn" class="press w-full rounded-xl bg-[var(--accent)] py-2.5 text-[14px] font-semibold text-[var(--on-accent)]">Đóng</button>
     `;
     const memoInp = $('#qrCustomMemoInput');
@@ -345,6 +420,12 @@ function openMemberQr(memberName, amount) {
     }
   }
   modal.hidden = false;
+  if ($('#qrReportPaidBtn') && memberId) {
+    $('#qrReportPaidBtn').onclick = () => {
+      reportMemberTransfer(memberId);
+      modal.hidden = true;
+    };
+  }
   $('#qrCloseBtn').onclick = () => { modal.hidden = true; };
 }
 const qrBackdropEl = $('#qrBackdrop');
@@ -522,6 +603,7 @@ function emptyDB() {
     cashChecks: [],
     members: [],
     memberPaid: {},
+    memberPending: {},
     settings: {
       theme: 'giay-cu',
       notifDaily: true,
@@ -542,6 +624,7 @@ function normalizeDB(parsed) {
   out.cashChecks = Array.isArray(out.cashChecks) ? out.cashChecks : [];
   out.members = Array.isArray(out.members) ? out.members : [];
   out.memberPaid = out.memberPaid && typeof out.memberPaid === 'object' ? out.memberPaid : {};
+  out.memberPending = out.memberPending && typeof out.memberPending === 'object' ? out.memberPending : {};
   out.settings = Object.assign(base.settings, (parsed && parsed.settings) || {});
   out.settings.bank = Object.assign(base.settings.bank, ((parsed && parsed.settings && parsed.settings.bank) || {}));
   return out;
@@ -692,7 +775,8 @@ function getRecent(n = 5) { return DB.transactions.slice().sort((a, b) => b.crea
 function membersStats() {
   const total = DB.members.length;
   const paid = DB.members.filter(m => DB.memberPaid[m.id]).length;
-  return { total, paid, unpaid: total - paid };
+  const pending = DB.members.filter(m => !DB.memberPaid[m.id] && DB.memberPending?.[m.id]).length;
+  return { total, paid, pending, unpaid: total - paid };
 }
 
 /* ============================================================
@@ -818,6 +902,11 @@ function renderHome() {
   if (drafts.length) {
     reminders.push(`<li><button data-act="open-inbox" class="press flex w-full items-center gap-3 py-2.5 text-left text-[15px]">
       <span class="text-lg">📥</span><span class="flex-1">${drafts.length} khoản nháp chờ xử lý</span>
+      <span class="text-[var(--text-3)]">›</span></button></li>`);
+  }
+  if (mem.pending > 0) {
+    reminders.push(`<li><button data-act="open-members" class="press flex w-full items-center gap-3 py-2.5 text-left text-[15px]">
+      <span class="text-lg">💸</span><span class="flex-1 font-medium text-[var(--expense)]">${mem.pending} bạn báo đã chuyển khoản (chờ duyệt)</span>
       <span class="text-[var(--text-3)]">›</span></button></li>`);
   }
   if (mem.unpaid > 0) {
@@ -2034,6 +2123,12 @@ function renderMembersSheet() {
       <div class="flex-1 text-center"><p class="text-[20px] font-bold tabular-nums">${stats.total}</p><p class="text-[11px] text-[var(--text-3)]">Tổng</p></div>
     </div>` : ''}
 
+    ${stats.pending > 0 ? `
+    <div class="mx-5 mt-2.5 flex items-center justify-between rounded-xl border border-[var(--expense)] bg-[var(--draft-bg)] px-3.5 py-2.5 text-[12px]">
+      <span class="font-medium text-[var(--expense)]">💸 Có ${stats.pending} bạn báo đã chuyển khoản</span>
+      <span class="text-[11px] text-[var(--text-3)]">Bấm Duyệt ✓ bên dưới</span>
+    </div>` : ''}
+
     <div class="scroll-y flex-1 overflow-y-auto px-5 pb-3 pt-4">
       ${DB.members.length === 0
         ? `<div class="py-8 text-center">
@@ -2044,13 +2139,25 @@ function renderMembersSheet() {
         : `<ul class="divide-y divide-[var(--border)]">
             ${DB.members.map(m => {
               const paid = !!DB.memberPaid[m.id];
-              return `<li class="flex items-center gap-2 py-2.5">
+              const pending = !paid && !!DB.memberPending?.[m.id];
+              const canEditDirectly = !isViewOnlyMode() || isAdminUnlocked;
+              return `<li class="flex items-center gap-1.5 py-2.5">
                 <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[13px] font-semibold">${escapeHtml(m.name[0])}</span>
-                <span class="flex-1 truncate text-[14px]">${escapeHtml(m.name)}</span>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-[14px]">${escapeHtml(m.name)}</p>
+                  ${pending ? `<p class="text-[11px] font-medium text-[var(--expense)]">⏳ Chờ duyệt CK</p>` : ''}
+                </div>
                 ${!paid ? `<button data-qr-member="${m.id}" class="press rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--accent)]">QR</button>` : ''}
-                <button data-toggle-member="${m.id}" class="press rounded-lg px-3 py-1.5 text-[12px] font-medium
-                  ${paid ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'bg-[var(--surface-2)] text-[var(--text-2)]'}">
-                  ${paid ? '✓ Đã đóng' : 'Chưa đóng'}
+                ${(!paid && !canEditDirectly)
+                  ? `<button data-report-member="${m.id}" class="press rounded-lg px-2.5 py-1.5 text-[12px] font-medium ${pending ? 'bg-[var(--draft-bg)] text-[var(--expense)] border border-[var(--expense)]' : 'bg-[var(--accent-soft)] text-[var(--income)]'}">
+                      ${pending ? 'Đã báo CK' : 'Báo đã CK'}
+                    </button>`
+                  : ''}
+                <button data-toggle-member="${m.id}" class="press rounded-lg px-2.5 py-1.5 text-[12px] font-medium
+                  ${paid
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                    : (pending ? 'bg-[var(--expense)] text-white' : 'bg-[var(--surface-2)] text-[var(--text-2)]')}">
+                  ${paid ? '✓ Đã đóng' : (pending ? 'Duyệt ✓' : 'Chưa đóng')}
                 </button>
                 <button data-remove-member="${m.id}" aria-label="Xoá thành viên"
                   class="press flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--warn)]">×</button>
@@ -2075,7 +2182,13 @@ function renderMembersSheet() {
   $$('[data-qr-member]', el).forEach(btn => {
     btn.onclick = () => {
       const m = DB.members.find(x => x.id === btn.dataset.qrMember);
-      if (m) openMemberQr(m.name, DB.settings.termFee);
+      if (m) openMemberQr(m.name, DB.settings.termFee, m.id);
+    };
+  });
+
+  $$('[data-report-member]', el).forEach(btn => {
+    btn.onclick = () => {
+      reportMemberTransfer(btn.dataset.reportMember);
     };
   });
 
@@ -2083,8 +2196,8 @@ function renderMembersSheet() {
     btn.onclick = () => {
       if (!requirePinIfNeeded()) return;
       const id = btn.dataset.toggleMember;
-      if (DB.memberPaid[id]) delete DB.memberPaid[id];
-      else DB.memberPaid[id] = true;
+      const nextPaid = !DB.memberPaid[id];
+      setMemberPaidStatus(id, nextPaid);
       saveDB(); renderMembersSheet();
       if (currentView === 'home') render();
     };
@@ -2099,6 +2212,7 @@ function renderMembersSheet() {
       if (!confirm(`Xoá "${m.name}" khỏi danh sách?`)) return;
       DB.members = DB.members.filter(x => x.id !== id);
       delete DB.memberPaid[id];
+      if (DB.memberPending) delete DB.memberPending[id];
       saveDB(); renderMembersSheet();
       if (currentView === 'home') render();
     };
