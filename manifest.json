@@ -1,0 +1,16 @@
+{
+  "name": "Sổ Quỹ Lớp",
+  "short_name": "Sổ Quỹ",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#F5F0E8",
+  "theme_color": "#7A9E7E",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2921/2921222.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
