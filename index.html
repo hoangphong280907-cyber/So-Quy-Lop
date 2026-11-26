@@ -199,6 +199,8 @@ const BANK_OPTIONS = [
 let firestoreDb = null;
 let firestoreUnsub = null;
 let isAdminUnlocked = sessionStorage.getItem('sq_pin_ok') === '1';
+let isApplyingRemoteSnapshot = false;
+let isPublicGuestMode = false;
 
 function getRoomId() {
   const paramRoom = new URLSearchParams(location.search).get('room');
@@ -210,42 +212,74 @@ function isViewOnlyMode() {
   return new URLSearchParams(location.search).get('view') === '1';
 }
 
-function initRealtimeSync() {
-  if (firestoreUnsub) { firestoreUnsub(); firestoreUnsub = null; }
-  if (!FIREBASE_CONFIG.apiKey || !FIREBASE_CONFIG.projectId) return;
-  try {
-    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+function ensureFirestoreInstance() {
+  if (!FIREBASE_CONFIG.apiKey || !FIREBASE_CONFIG.projectId) return null;
+  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+  if (!firestoreDb) {
     firestoreDb = firebase.firestore();
     firestoreDb.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+  }
+  return firestoreDb;
+}
+
+function initRealtimeSync() {
+  if (firestoreUnsub) { firestoreUnsub(); firestoreUnsub = null; }
+  try {
+    const dbInst = ensureFirestoreInstance();
+    if (!dbInst) return;
 
     const roomId = getRoomId();
-    firestoreUnsub = firestoreDb.collection('so_quy_rooms').doc(roomId).onSnapshot((snap) => {
-      if (!snap.exists || !currentUser) return;
+    firestoreUnsub = dbInst.collection('so_quy_rooms').doc(roomId).onSnapshot((snap) => {
+      if (!snap.exists) return;
       const remote = snap.data();
       if (!remote || !remote.db) return;
       const localStamp = DB?._updatedAt || 0;
-      if ((remote.updatedAt || 0) <= localStamp) return;
+      if (!isPublicGuestMode && (remote.updatedAt || 0) <= localStamp) return;
 
+      isApplyingRemoteSnapshot = true;
       DB = normalizeDB(remote.db);
       DB._updatedAt = remote.updatedAt || Date.now();
-      safeStorage.setItem(userDBKey(currentUser.username), JSON.stringify(DB));
+      checkDailyMemberReset(false);
+      if (currentUser) {
+        safeStorage.setItem(userDBKey(currentUser.username), JSON.stringify(DB));
+      }
       balanceHidden = !!DB.settings.hideBalance;
       document.documentElement.dataset.theme = DB.settings.theme || 'giay-cu';
-      render();
+      if (currentUser || isPublicGuestMode) {
+        render();
+        if ($('#sheetOverlay')?.classList.contains('open')) renderMembersSheet();
+      }
+      isApplyingRemoteSnapshot = false;
     }, (err) => console.warn('Firestore sync:', err));
   } catch (e) {
+    isApplyingRemoteSnapshot = false;
     console.warn('Firebase init skipped:', e);
   }
 }
 
 function pushCloudDB() {
-  if (!firestoreDb || !currentUser || !DB) return;
-  const roomId = getRoomId();
-  firestoreDb.collection('so_quy_rooms').doc(roomId).set({
-    db: DB,
-    updatedAt: DB._updatedAt || Date.now(),
-    owner: currentUser.username
-  }, { merge: true }).catch(() => {});
+  if (isApplyingRemoteSnapshot || !DB) return;
+  if (!currentUser && !isPublicGuestMode) return;
+  try {
+    const dbInst = ensureFirestoreInstance();
+    if (!dbInst) return;
+    const roomId = getRoomId();
+    dbInst.collection('so_quy_rooms').doc(roomId).set({
+      db: DB,
+      updatedAt: DB._updatedAt || Date.now(),
+      owner: currentUser ? currentUser.username : (DB._owner || 'public_room')
+    }, { merge: true }).catch(() => {});
+  } catch (e) {}
+}
+
+function enterPublicGuestView() {
+  isPublicGuestMode = true;
+  currentUser = { username: 'Khách xem lớp', createdAt: Date.now() };
+  DB = normalizeDB({});
+  balanceHidden = false;
+  showAppShell();
+  render();
+  initRealtimeSync();
 }
 
 function requirePinIfNeeded() {
@@ -273,10 +307,33 @@ function stripVietnamese(str) {
     .trim();
 }
 
-function formatTransferMemo(template, memberName) {
+function ensureMemberCodes(list) {
+  if (!Array.isArray(list)) return [];
+  const used = new Set();
+  list.forEach((m, idx) => {
+    if (m && m.code) used.add(String(m.code).toUpperCase());
+  });
+  let counter = 1;
+  return list.map((m, idx) => {
+    if (!m) return m;
+    let code = m.code ? String(m.code).toUpperCase() : '';
+    if (!code) {
+      while (used.has(`TV${String(counter).padStart(2, '0')}`)) counter++;
+      code = `TV${String(counter).padStart(2, '0')}`;
+      used.add(code);
+      counter++;
+    }
+    return { ...m, code };
+  });
+}
+
+function formatTransferMemo(template, memberName, memberCode = '') {
   const cleanName = stripVietnamese(memberName || '').toUpperCase();
+  const cleanCode = stripVietnamese(memberCode || '').toUpperCase();
   const raw = (template !== undefined && template !== null) ? String(template) : 'NOP QUY - {ten}';
-  const replaced = raw.replace(/\{ten\}/gi, cleanName);
+  const replaced = raw
+    .replace(/\{ten\}/gi, cleanName)
+    .replace(/\{(ma|stt)\}/gi, cleanCode);
   return stripVietnamese(replaced).toUpperCase().slice(0, 50);
 }
 
@@ -288,6 +345,46 @@ function buildVietQrUrl({ bankCode, accountNo, accountName, amount, customMemo }
   const holder = encodeURIComponent(stripVietnamese(accountName || '').toUpperCase());
   const money = Math.max(0, Math.round(Number(amount) || 0));
   return `https://img.vietqr.io/image/${bank}-${stk}-compact2.png?amount=${money}&addInfo=${memo}&accountName=${holder}`;
+}
+
+function formatExactDateTime(ts = Date.now()) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} · ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
+function isMemberPaidToday(memberId) {
+  const val = DB?.memberPaid?.[memberId];
+  if (!val) return false;
+  if (val === true) return true;
+  if (typeof val === 'object') return true;
+  return false;
+}
+
+function getMemberPaidLabel(memberId) {
+  const val = DB?.memberPaid?.[memberId];
+  if (!val) return '';
+  if (typeof val === 'object' && val.paidAtStr) return val.paidAtStr;
+  return 'Đã đóng hôm nay';
+}
+
+function checkDailyMemberReset(shouldSave = true) {
+  if (!DB || !DB.settings) return false;
+  const today = todayISO();
+  if (!DB.lastMemberResetDate) {
+    DB.lastMemberResetDate = today;
+    return false;
+  }
+  if (DB.settings.dailyResetMembers === false) return false;
+  if (DB.lastMemberResetDate !== today) {
+    DB.lastMemberResetDate = today;
+    // Reset những bạn đã đóng ở ngày trước về chưa đóng trong ngày mới
+    // Lịch sử đóng quỹ (paymentLogs) và giao dịch tài khoản vẫn giữ nguyên
+    DB.memberPaid = {};
+    if (shouldSave) saveDB();
+    return true;
+  }
+  return false;
 }
 
 function reportMemberTransfer(memberId) {
@@ -310,12 +407,39 @@ function setMemberPaidStatus(memberId, shouldPay, options = {}) {
   const m = DB.members.find(x => x.id === memberId);
   if (!m) return;
   DB.memberPending = DB.memberPending && typeof DB.memberPending === 'object' ? DB.memberPending : {};
-  const autoTxId = `fund_${memberId}`;
+  DB.paymentLogs = Array.isArray(DB.paymentLogs) ? DB.paymentLogs : [];
+  const today = todayISO();
+  const autoTxId = `fund_${today}_${memberId}`;
 
   if (shouldPay) {
-    DB.memberPaid[memberId] = true;
-    delete DB.memberPending[memberId];
+    const now = Date.now();
+    const paidAtStr = formatExactDateTime(now);
     const fee = Math.max(0, Math.round(Number(DB.settings?.termFee) || 0));
+    DB.memberPaid[memberId] = {
+      paid: true,
+      date: today,
+      paidAt: now,
+      paidAtStr,
+      amount: fee
+    };
+    delete DB.memberPending[memberId];
+
+    // Lưu vào lịch sử đóng quỹ (không bị mất khi qua ngày mới)
+    const logId = `log_${today}_${memberId}`;
+    const logIdx = DB.paymentLogs.findIndex(x => x.id === logId);
+    const logEntry = {
+      id: logId,
+      memberId,
+      memberCode: m.code || '',
+      memberName: m.name,
+      amount: fee,
+      date: today,
+      paidAt: now,
+      paidAtStr
+    };
+    if (logIdx >= 0) DB.paymentLogs[logIdx] = logEntry;
+    else DB.paymentLogs.unshift(logEntry);
+
     if (fee > 0) {
       const existingIdx = DB.transactions.findIndex(t => t.id === autoTxId);
       const txObj = {
@@ -325,12 +449,12 @@ function setMemberPaidStatus(memberId, shouldPay, options = {}) {
         category: 'quy',
         categoryName: 'Quỹ lớp',
         account: 'bank',
-        date: todayISO(),
+        date: today,
         member: m.name,
-        note: `Thu quỹ lớp · ${m.name}`,
+        note: `Thu quỹ lớp · ${m.name} (${paidAtStr})`,
         receipt: null,
         status: 'done',
-        createdAt: Date.now()
+        createdAt: now
       };
       if (existingIdx >= 0) {
         DB.transactions[existingIdx] = { ...DB.transactions[existingIdx], ...txObj, createdAt: DB.transactions[existingIdx].createdAt };
@@ -338,15 +462,17 @@ function setMemberPaidStatus(memberId, shouldPay, options = {}) {
         DB.transactions.push(txObj);
       }
       if (!options.silent) {
-        toast(`✓ ${m.name} đã đóng (+${fmtMoney(fee)} vào Tài khoản)`, 'var(--income)');
+        toast(`✓ ${m.name} đã đóng lúc ${paidAtStr}`, 'var(--income)');
       }
     } else if (!options.silent) {
-      toast(`✓ Đã đánh dấu ${m.name} đã đóng`, 'var(--income)');
+      toast(`✓ ${m.name} đã đóng lúc ${paidAtStr}`, 'var(--income)');
     }
   } else {
     delete DB.memberPaid[memberId];
+    const logId = `log_${today}_${memberId}`;
+    DB.paymentLogs = DB.paymentLogs.filter(x => x.id !== logId);
     const beforeLen = DB.transactions.length;
-    DB.transactions = DB.transactions.filter(t => t.id !== autoTxId);
+    DB.transactions = DB.transactions.filter(t => t.id !== autoTxId && t.id !== `fund_${memberId}`);
     if (!options.silent) {
       toast(DB.transactions.length < beforeLen
         ? `Đã hoàn tác ${m.name} & trừ khoản thu khỏi Tài khoản`
@@ -355,12 +481,13 @@ function setMemberPaidStatus(memberId, shouldPay, options = {}) {
   }
 }
 
-function openMemberQr(memberName, amount, memberId = null) {
+function openMemberQr(memberName, amount, memberId = null, memberCode = '') {
   const bankCfg = DB?.settings?.bank || {};
   const amtNum = Math.max(0, Math.round(Number(amount ?? DB?.settings?.termFee ?? 0)));
   const initialMemo = formatTransferMemo(
     bankCfg.transferNote !== undefined ? bankCfg.transferNote : 'NOP QUY - {ten}',
-    memberName
+    memberName,
+    memberCode
   );
   const url = buildVietQrUrl({
     bankCode: bankCfg.bankCode || 'BIDV',
@@ -604,11 +731,14 @@ function emptyDB() {
     members: [],
     memberPaid: {},
     memberPending: {},
+    paymentLogs: [],
+    lastMemberResetDate: todayISO(),
     settings: {
       theme: 'giay-cu',
       notifDaily: true,
       notifTime: '21:00',
       termFee: 50000,
+      dailyResetMembers: true,
       hideBalance: false,
       adminPin: '1234',
       bank: { bankCode: 'BIDV', accountNo: '', accountName: '', transferNote: 'NOP QUY - {ten}' }
@@ -622,9 +752,11 @@ function normalizeDB(parsed) {
   const out = Object.assign(base, parsed || {});
   out.transactions = Array.isArray(out.transactions) ? out.transactions : [];
   out.cashChecks = Array.isArray(out.cashChecks) ? out.cashChecks : [];
-  out.members = Array.isArray(out.members) ? out.members : [];
+  out.members = ensureMemberCodes(Array.isArray(out.members) ? out.members : []);
   out.memberPaid = out.memberPaid && typeof out.memberPaid === 'object' ? out.memberPaid : {};
   out.memberPending = out.memberPending && typeof out.memberPending === 'object' ? out.memberPending : {};
+  out.paymentLogs = Array.isArray(out.paymentLogs) ? out.paymentLogs : [];
+  out.lastMemberResetDate = out.lastMemberResetDate || todayISO();
   out.settings = Object.assign(base.settings, (parsed && parsed.settings) || {});
   out.settings.bank = Object.assign(base.settings.bank, ((parsed && parsed.settings && parsed.settings.bank) || {}));
   return out;
@@ -640,10 +772,16 @@ function loadUserDB(username) {
 }
 
 function saveDB() {
-  if (!currentUser || !DB) return;
-  DB._updatedAt = Date.now();
-  safeStorage.setItem(userDBKey(currentUser.username), JSON.stringify(DB));
-  pushCloudDB();
+  if (!DB) return;
+  if (!isApplyingRemoteSnapshot) {
+    DB._updatedAt = Date.now();
+  }
+  if (currentUser && !isPublicGuestMode) {
+    safeStorage.setItem(userDBKey(currentUser.username), JSON.stringify(DB));
+  }
+  if (!isApplyingRemoteSnapshot) {
+    pushCloudDB();
+  }
 }
 
 function exportBackupJSON() {
@@ -1552,6 +1690,13 @@ function renderSettings() {
           <span class="text-[13px] text-[var(--text-3)]">đ</span>
         </div>
       </label>
+      <label class="flex items-center justify-between py-2">
+        <div>
+          <span class="block text-[14px]">Tự động reset trạng thái qua ngày mới</span>
+          <span class="block text-[11px] text-[var(--text-3)]">Sang 00:00 ngày mới đưa người đã đóng về chưa đóng (vẫn giữ lịch sử)</span>
+        </div>
+        <input type="checkbox" id="setDailyResetMembers" ${DB.settings.dailyResetMembers !== false ? 'checked' : ''} class="h-5 w-5 accent-[var(--accent)]" />
+      </label>
     </section>
 
     <section class="card p-4 space-y-2">
@@ -1587,6 +1732,8 @@ function wireView() {
   if (time) time.onchange = (e) => { if (!requirePinIfNeeded()) return; DB.settings.notifTime = e.target.value; saveDB(); };
   const fee = $('#setFee');
   if (fee) fee.onchange = (e) => { if (!requirePinIfNeeded()) return; DB.settings.termFee = parseInt(e.target.value, 10) || 0; saveDB(); };
+  const dailyResetInp = $('#setDailyResetMembers');
+  if (dailyResetInp) dailyResetInp.onchange = (e) => { if (!requirePinIfNeeded()) return; DB.settings.dailyResetMembers = e.target.checked; saveDB(); };
 
   const bankSel = $('#setBankSelect');
   const bankCustom = $('#setBankCustom');
@@ -2099,17 +2246,113 @@ function saveCapture() {
 /* ============================================================
    16. SHEET: MEMBERS + VIETQR
 ============================================================ */
-function openMembersSheet() { renderMembersSheet(); showSheet(); }
+let memberFilterTab = 'all';
+
+function openMembersSheet() {
+  checkDailyMemberReset(true);
+  renderMembersSheet();
+  showSheet();
+}
+
+function renderMemberRowsHtml(list, query = '') {
+  const qNorm = stripVietnamese(query || '').toLowerCase();
+  const rows = qNorm
+    ? list.filter(m => stripVietnamese(m.name).toLowerCase().includes(qNorm) || stripVietnamese(m.code || '').toLowerCase().includes(qNorm))
+    : list;
+  if (!rows.length) {
+    return `<div class="py-8 text-center text-[13px] text-[var(--text-3)]">Không tìm thấy thành viên phù hợp</div>`;
+  }
+  return `<ul class="divide-y divide-[var(--border)]">
+    ${rows.map(m => {
+      const paid = isMemberPaidToday(m.id);
+      const paidObj = DB.memberPaid?.[m.id];
+      const paidTimeStr = paid ? getMemberPaidLabel(m.id) : '';
+      const paidAmtStr = (paid && typeof paidObj === 'object' && typeof paidObj.amount === 'number') ? ` · ${fmtMoney(paidObj.amount)}` : '';
+      const pending = !paid && !!DB.memberPending?.[m.id];
+      const canEditDirectly = !isViewOnlyMode() || isAdminUnlocked;
+      return `<li class="flex items-center gap-1.5 py-2.5">
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[12px] font-semibold">${escapeHtml(m.code || m.name[0])}</span>
+        <div class="min-w-0 flex-1">
+          <p class="truncate text-[14px]">${escapeHtml(m.name)}</p>
+          ${paid
+            ? `<p class="text-[11px] font-mono text-[var(--income)]">🕒 ${escapeHtml(paidTimeStr)}${escapeHtml(paidAmtStr)}</p>`
+            : (pending ? `<p class="text-[11px] font-medium text-[var(--expense)]">⏳ Chờ duyệt CK</p>` : `<p class="text-[11px] font-mono text-[var(--text-3)]">${escapeHtml(m.code || '')}</p>`)}
+        </div>
+        ${!paid ? `<button data-qr-member="${m.id}" class="press rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--accent)]">QR</button>` : ''}
+        ${(!paid && !canEditDirectly)
+          ? `<button data-report-member="${m.id}" class="press rounded-lg px-2.5 py-1.5 text-[12px] font-medium ${pending ? 'bg-[var(--draft-bg)] text-[var(--expense)] border border-[var(--expense)]' : 'bg-[var(--accent-soft)] text-[var(--income)]'}">
+              ${pending ? 'Đã báo CK' : 'Báo đã CK'}
+            </button>`
+          : ''}
+        <button data-toggle-member="${m.id}" class="press rounded-lg px-2.5 py-1.5 text-[12px] font-medium
+          ${paid
+            ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+            : (pending ? 'bg-[var(--expense)] text-white' : 'bg-[var(--surface-2)] text-[var(--text-2)]')}">
+          ${paid ? '✓ Đã đóng' : (pending ? 'Duyệt ✓' : 'Chưa đóng')}
+        </button>
+        <button data-remove-member="${m.id}" aria-label="Xoá thành viên"
+          class="press flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--warn)]">×</button>
+      </li>`;
+    }).join('')}
+  </ul>`;
+}
+
+function wireMemberRowEvents(container) {
+  $$('[data-qr-member]', container).forEach(btn => {
+    btn.onclick = () => {
+      const m = DB.members.find(x => x.id === btn.dataset.qrMember);
+      if (m) openMemberQr(m.name, DB.settings.termFee, m.id, m.code || '');
+    };
+  });
+  $$('[data-report-member]', container).forEach(btn => {
+    btn.onclick = () => {
+      reportMemberTransfer(btn.dataset.reportMember);
+    };
+  });
+  $$('[data-toggle-member]', container).forEach(btn => {
+    btn.onclick = () => {
+      if (!requirePinIfNeeded()) return;
+      const id = btn.dataset.toggleMember;
+      const nextPaid = !isMemberPaidToday(id);
+      setMemberPaidStatus(id, nextPaid);
+      saveDB(); renderMembersSheet();
+      if (currentView === 'home') render();
+    };
+  });
+  $$('[data-remove-member]', container).forEach(btn => {
+    btn.onclick = () => {
+      if (!requirePinIfNeeded()) return;
+      const id = btn.dataset.removeMember;
+      const m = DB.members.find(x => x.id === id);
+      if (!m) return;
+      if (!confirm(`Xoá "${m.name}" khỏi danh sách?`)) return;
+      DB.members = DB.members.filter(x => x.id !== id);
+      delete DB.memberPaid[id];
+      if (DB.memberPending) delete DB.memberPending[id];
+      saveDB(); renderMembersSheet();
+      if (currentView === 'home') render();
+    };
+  });
+}
 
 function renderMembersSheet() {
+  checkDailyMemberReset(true);
   const stats = membersStats();
+  const logs = Array.isArray(DB.paymentLogs) ? DB.paymentLogs : [];
+  const filteredMembers = DB.members.filter(m => {
+    const paid = isMemberPaidToday(m.id);
+    if (memberFilterTab === 'unpaid') return !paid;
+    if (memberFilterTab === 'paid') return paid;
+    return true;
+  });
+
   const el = $('#sheetContent');
   el.innerHTML = `
     <div class="flex justify-center pt-2.5 md:hidden"><span class="h-1.5 w-10 rounded-full bg-[var(--border)]"></span></div>
     <header class="flex items-center justify-between px-5 pb-2 pt-3">
       <div>
-        <h1 class="text-[18px] font-semibold">Thành viên lớp</h1>
-        <p class="text-[12px] text-[var(--text-3)]">Mức quỹ: ${fmtMoney(DB.settings.termFee)} / đợt</p>
+        <h1 class="text-[18px] font-semibold">Thành viên lớp · ${formatDateVN(todayISO())}</h1>
+        <p class="text-[12px] text-[var(--text-3)]">Mức quỹ: ${fmtMoney(DB.settings.termFee)} · ${DB.settings.dailyResetMembers !== false ? 'Tự làm mới mỗi ngày' : 'Giữ trạng thái theo đợt'}</p>
       </div>
       <button data-sheet-close class="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-2)] hover:bg-[var(--surface-2)]">✕</button>
     </header>
@@ -2123,47 +2366,52 @@ function renderMembersSheet() {
       <div class="flex-1 text-center"><p class="text-[20px] font-bold tabular-nums">${stats.total}</p><p class="text-[11px] text-[var(--text-3)]">Tổng</p></div>
     </div>` : ''}
 
+    <div class="mx-5 mt-2.5 flex gap-1.5 overflow-x-auto pb-1">
+      ${[
+        { id: 'all', label: `Tất cả (${stats.total})` },
+        { id: 'unpaid', label: `Chưa đóng (${stats.unpaid})` },
+        { id: 'paid', label: `Đã đóng (${stats.paid})` },
+        { id: 'logs', label: `Lịch sử nộp (${logs.length})` }
+      ].map(tab => `
+        <button data-member-tab="${tab.id}" class="press shrink-0 rounded-lg px-2.5 py-1.5 text-[12px] font-medium
+          ${memberFilterTab === tab.id ? 'bg-[var(--accent)] text-[var(--on-accent)]' : 'bg-[var(--surface-2)] text-[var(--text-2)]'}">
+          ${tab.label}
+        </button>`).join('')}
+    </div>
+
+    ${memberFilterTab !== 'logs' && DB.members.length > 0 ? `
+    <div class="mx-5 mt-2">
+      <input id="memberSearchInp" type="text" placeholder="Tìm nhanh tên hoặc mã (VD: Kiên, TV05)..."
+        class="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[13px] outline-none placeholder:text-[var(--text-3)]" />
+    </div>` : ''}
+
     ${stats.pending > 0 ? `
-    <div class="mx-5 mt-2.5 flex items-center justify-between rounded-xl border border-[var(--expense)] bg-[var(--draft-bg)] px-3.5 py-2.5 text-[12px]">
+    <div class="mx-5 mt-2 flex items-center justify-between rounded-xl border border-[var(--expense)] bg-[var(--draft-bg)] px-3.5 py-2 text-[12px]">
       <span class="font-medium text-[var(--expense)]">💸 Có ${stats.pending} bạn báo đã chuyển khoản</span>
       <span class="text-[11px] text-[var(--text-3)]">Bấm Duyệt ✓ bên dưới</span>
     </div>` : ''}
 
-    <div class="scroll-y flex-1 overflow-y-auto px-5 pb-3 pt-4">
-      ${DB.members.length === 0
-        ? `<div class="py-8 text-center">
-            <p class="text-3xl mb-2">👥</p>
-            <p class="text-[14px] font-medium">Chưa có thành viên nào</p>
-            <p class="mt-1 text-[12px] text-[var(--text-3)]">Thêm tên bên dưới hoặc dán danh sách lớp vào</p>
-          </div>`
-        : `<ul class="divide-y divide-[var(--border)]">
-            ${DB.members.map(m => {
-              const paid = !!DB.memberPaid[m.id];
-              const pending = !paid && !!DB.memberPending?.[m.id];
-              const canEditDirectly = !isViewOnlyMode() || isAdminUnlocked;
-              return `<li class="flex items-center gap-1.5 py-2.5">
-                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[13px] font-semibold">${escapeHtml(m.name[0])}</span>
-                <div class="min-w-0 flex-1">
-                  <p class="truncate text-[14px]">${escapeHtml(m.name)}</p>
-                  ${pending ? `<p class="text-[11px] font-medium text-[var(--expense)]">⏳ Chờ duyệt CK</p>` : ''}
-                </div>
-                ${!paid ? `<button data-qr-member="${m.id}" class="press rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--accent)]">QR</button>` : ''}
-                ${(!paid && !canEditDirectly)
-                  ? `<button data-report-member="${m.id}" class="press rounded-lg px-2.5 py-1.5 text-[12px] font-medium ${pending ? 'bg-[var(--draft-bg)] text-[var(--expense)] border border-[var(--expense)]' : 'bg-[var(--accent-soft)] text-[var(--income)]'}">
-                      ${pending ? 'Đã báo CK' : 'Báo đã CK'}
-                    </button>`
-                  : ''}
-                <button data-toggle-member="${m.id}" class="press rounded-lg px-2.5 py-1.5 text-[12px] font-medium
-                  ${paid
-                    ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-                    : (pending ? 'bg-[var(--expense)] text-white' : 'bg-[var(--surface-2)] text-[var(--text-2)]')}">
-                  ${paid ? '✓ Đã đóng' : (pending ? 'Duyệt ✓' : 'Chưa đóng')}
-                </button>
-                <button data-remove-member="${m.id}" aria-label="Xoá thành viên"
-                  class="press flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--warn)]">×</button>
-              </li>`;
-            }).join('')}
-          </ul>`}
+    <div id="memberListScroll" class="scroll-y flex-1 overflow-y-auto px-5 pb-3 pt-3">
+      ${memberFilterTab === 'logs'
+        ? (logs.length === 0
+            ? `<div class="py-10 text-center text-[13px] text-[var(--text-3)]">Chưa có lịch sử nộp quỹ nào được ghi lại</div>`
+            : `<ul class="divide-y divide-[var(--border)]">
+                ${logs.map(lg => `
+                  <li class="flex items-center justify-between gap-2 py-2.5">
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-[14px] font-medium">${lg.memberCode ? `<span class="mr-1 font-mono text-[11px] text-[var(--text-3)]">[${escapeHtml(lg.memberCode)}]</span>` : ''}${escapeHtml(lg.memberName)}</p>
+                      <p class="text-[11px] font-mono text-[var(--text-3)]">🕒 ${escapeHtml(lg.paidAtStr || formatExactDateTime(lg.paidAt))}</p>
+                    </div>
+                    <span class="shrink-0 text-[13px] font-semibold text-[var(--income)] tabular-nums">+${fmtMoney(lg.amount || 0)}</span>
+                  </li>`).join('')}
+              </ul>`)
+        : (DB.members.length === 0
+            ? `<div class="py-8 text-center">
+                <p class="text-3xl mb-2">👥</p>
+                <p class="text-[14px] font-medium">Chưa có thành viên nào</p>
+                <p class="mt-1 text-[12px] text-[var(--text-3)]">Thêm tên bên dưới hoặc dán danh sách lớp vào</p>
+              </div>`
+            : `<div id="memberRowsContainer">${renderMemberRowsHtml(filteredMembers, '')}</div>`)}
 
       <div class="mt-4 flex gap-2">
         <input id="newMemberName" type="text" placeholder="Tên thành viên mới" maxlength="40"
@@ -2179,54 +2427,29 @@ function renderMembersSheet() {
       <button data-copy-debt class="press w-full rounded-xl bg-[var(--accent)] py-3 text-[14px] font-semibold text-[var(--on-accent)]">📋 Copy tin nhắc nợ</button>
     </footer>`;
 
-  $$('[data-qr-member]', el).forEach(btn => {
-    btn.onclick = () => {
-      const m = DB.members.find(x => x.id === btn.dataset.qrMember);
-      if (m) openMemberQr(m.name, DB.settings.termFee, m.id);
-    };
-  });
+  $$('[data-member-tab]', el).forEach(btn => { btn.onclick = () => { memberFilterTab = btn.dataset.memberTab; renderMembersSheet(); }; });
 
-  $$('[data-report-member]', el).forEach(btn => {
-    btn.onclick = () => {
-      reportMemberTransfer(btn.dataset.reportMember);
-    };
-  });
-
-  $$('[data-toggle-member]', el).forEach(btn => {
-    btn.onclick = () => {
-      if (!requirePinIfNeeded()) return;
-      const id = btn.dataset.toggleMember;
-      const nextPaid = !DB.memberPaid[id];
-      setMemberPaidStatus(id, nextPaid);
-      saveDB(); renderMembersSheet();
-      if (currentView === 'home') render();
-    };
-  });
-
-  $$('[data-remove-member]', el).forEach(btn => {
-    btn.onclick = () => {
-      if (!requirePinIfNeeded()) return;
-      const id = btn.dataset.removeMember;
-      const m = DB.members.find(x => x.id === id);
-      if (!m) return;
-      if (!confirm(`Xoá "${m.name}" khỏi danh sách?`)) return;
-      DB.members = DB.members.filter(x => x.id !== id);
-      delete DB.memberPaid[id];
-      if (DB.memberPending) delete DB.memberPending[id];
-      saveDB(); renderMembersSheet();
-      if (currentView === 'home') render();
-    };
-  });
+  const rowsContainer = $('#memberRowsContainer', el);
+  const searchInp = $('#memberSearchInp', el);
+  if (rowsContainer) {
+    wireMemberRowEvents(rowsContainer);
+    if (searchInp) {
+      searchInp.oninput = () => {
+        rowsContainer.innerHTML = renderMemberRowsHtml(filteredMembers, searchInp.value);
+        wireMemberRowEvents(rowsContainer);
+      };
+    }
+  }
 
   $('#addMemberBtn', el).onclick = addMemberFromInput;
   $('#newMemberName', el).onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addMemberFromInput(); } };
   $('[data-import-members]', el).onclick = importMembers;
 
   $('[data-copy-debt]', el).onclick = () => {
-    const unpaid = DB.members.filter(m => !DB.memberPaid[m.id]).map(m => m.name);
+    const unpaid = DB.members.filter(m => !isMemberPaidToday(m.id)).map(m => m.name);
     if (DB.members.length === 0) { toast('Chưa có thành viên nào để nhắc'); return; }
     if (unpaid.length === 0) { toast('Cả lớp đã đóng đủ 🎉', 'var(--income)'); return; }
-    const msg = `Chào cả lớp, hiện có ${unpaid.length} bạn chưa đóng quỹ đợt này (${fmtMoney(DB.settings.termFee)}/bạn): ${unpaid.join(', ')}. Các bạn sắp xếp đóng giúp mình nhé. Cảm ơn cả lớp 🌿`;
+    const msg = `Chào cả lớp, hiện có ${unpaid.length} bạn chưa đóng quỹ (${fmtMoney(DB.settings.termFee)}/bạn): ${unpaid.join(', ')}. Các bạn sắp xếp đóng giúp mình nhé. Cảm ơn cả lớp 🌿`;
     copyText(msg);
   };
 }
@@ -2239,7 +2462,8 @@ function addMemberFromInput() {
   if (DB.members.some(m => m.name.toLowerCase() === name.toLowerCase())) {
     toast('Tên này đã có trong danh sách'); return;
   }
-  DB.members.push({ id: uid(), name });
+  const nextCode = `TV${String(DB.members.length + 1).padStart(2, '0')}`;
+  DB.members.push({ id: uid(), code: nextCode, name });
   saveDB(); inp.value = '';
   renderMembersSheet();
   if (currentView === 'home') render();
@@ -2256,7 +2480,8 @@ function importMembers() {
   let added = 0, skipped = 0;
   for (const name of names) {
     if (DB.members.some(m => m.name.toLowerCase() === name.toLowerCase())) { skipped++; continue; }
-    DB.members.push({ id: uid(), name });
+    const nextCode = `TV${String(DB.members.length + 1).padStart(2, '0')}`;
+    DB.members.push({ id: uid(), code: nextCode, name });
     added++;
   }
   saveDB(); renderMembersSheet();
@@ -2390,6 +2615,7 @@ function showAppShell() {
 function enterApp(user) {
   currentUser = user;
   DB = loadUserDB(user.username);
+  checkDailyMemberReset(true);
   balanceHidden = !!DB.settings.hideBalance;
   document.documentElement.dataset.theme = DB.settings.theme || 'giay-cu';
   saveSession(user);
@@ -2458,8 +2684,14 @@ $('#authForm').onsubmit = (e) => {
 
 function init() {
   const user = loadSession();
-  if (user) enterApp(user);
-  else showAuthScreen();
+  if (user) {
+    isPublicGuestMode = false;
+    enterApp(user);
+  } else if (isViewOnlyMode() && new URLSearchParams(location.search).get('room')) {
+    enterPublicGuestView();
+  } else {
+    showAuthScreen();
+  }
 }
 
 init();
