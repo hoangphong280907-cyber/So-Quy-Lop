@@ -2328,10 +2328,10 @@ function renderMemberRowsHtml(list, query = '') {
       const canEditDirectly = !isViewOnlyMode() || isAdminUnlocked;
       const guestMode = isGuestLocked();
       return `<li class="flex items-center justify-between gap-2 py-2.5">
-        <div class="flex min-w-0 flex-1 items-center gap-2.5">
-          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[12px] font-semibold">${escapeHtml(m.code || m.name[0])}</span>
+        <div class="flex min-w-0 flex-1 items-center gap-2">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[11px] font-semibold">${escapeHtml(m.code || m.name[0])}</span>
           <div class="min-w-0 flex-1">
-            <p class="truncate text-[14px] font-medium">${escapeHtml(m.name)}</p>
+            <p class="break-words text-[13.5px] font-medium leading-snug">${escapeHtml(m.name)}</p>
             ${guestMode
               ? `<p class="text-[11px] font-mono text-[var(--text-3)]">${escapeHtml(m.code || '')}${pending ? ' · Đã gửi báo CK' : ''}</p>`
               : (paid
@@ -2339,11 +2339,11 @@ function renderMemberRowsHtml(list, query = '') {
                 : (pending ? `<p class="text-[11px] font-medium text-[var(--expense)]">⏳ Chờ duyệt CK</p>` : `<p class="text-[11px] font-mono text-[var(--text-3)]">${escapeHtml(m.code || '')}</p>`))}
           </div>
         </div>
-        <div class="flex shrink-0 items-center gap-1.5">
-          ${(guestMode || !paid) ? `<button data-qr-member="${m.id}" class="press rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-1.5 text-[12px] font-semibold text-[var(--accent)] whitespace-nowrap">QR</button>` : ''}
+        <div class="flex shrink-0 items-center gap-1">
+          ${(guestMode || !paid) ? `<button data-qr-member="${m.id}" class="press rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-[11.5px] font-semibold text-[var(--accent)] whitespace-nowrap">QR</button>` : ''}
           ${guestMode
-            ? `<button data-report-member="${m.id}" class="press rounded-lg px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap ${pending ? 'border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-2)]' : 'bg-[var(--accent)] text-[var(--on-accent)]'}">
-                ${pending ? 'Đã báo CK' : 'Tôi đã chuyển khoản'}
+            ? `<button data-report-member="${m.id}" class="press rounded-lg px-2.5 py-1.5 text-[11.5px] font-semibold whitespace-nowrap ${pending ? 'border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-2)]' : 'bg-[var(--accent)] text-[var(--on-accent)]'}">
+                ${pending ? 'Đã báo CK' : 'Đã CK'}
               </button>`
             : `
               <button data-toggle-member="${m.id}" class="press rounded-lg px-2.5 py-1.5 text-[12px] font-medium
