@@ -273,11 +273,18 @@ function stripVietnamese(str) {
     .trim();
 }
 
-function buildVietQrUrl({ bankCode, accountNo, accountName, amount, memberName }) {
+function formatTransferMemo(template, memberName) {
+  const cleanName = stripVietnamese(memberName || '').toUpperCase();
+  const raw = (template !== undefined && template !== null) ? String(template) : 'NOP QUY - {ten}';
+  const replaced = raw.replace(/\{ten\}/gi, cleanName);
+  return stripVietnamese(replaced).toUpperCase().slice(0, 50);
+}
+
+function buildVietQrUrl({ bankCode, accountNo, accountName, amount, customMemo }) {
   const bank = String(bankCode || 'BIDV').trim().toUpperCase();
   const stk = String(accountNo || '').replace(/\s+/g, '');
   if (!stk) return '';
-  const memo = encodeURIComponent(`NOP QUY - ${stripVietnamese(memberName || 'THANH VIEN').toUpperCase()}`);
+  const memo = encodeURIComponent(String(customMemo || '').trim());
   const holder = encodeURIComponent(stripVietnamese(accountName || '').toUpperCase());
   const money = Math.max(0, Math.round(Number(amount) || 0));
   return `https://img.vietqr.io/image/${bank}-${stk}-compact2.png?amount=${money}&addInfo=${memo}&accountName=${holder}`;
@@ -285,12 +292,17 @@ function buildVietQrUrl({ bankCode, accountNo, accountName, amount, memberName }
 
 function openMemberQr(memberName, amount) {
   const bankCfg = DB?.settings?.bank || {};
+  const amtNum = Math.max(0, Math.round(Number(amount ?? DB?.settings?.termFee ?? 0)));
+  const initialMemo = formatTransferMemo(
+    bankCfg.transferNote !== undefined ? bankCfg.transferNote : 'NOP QUY - {ten}',
+    memberName
+  );
   const url = buildVietQrUrl({
     bankCode: bankCfg.bankCode || 'BIDV',
     accountNo: bankCfg.accountNo || '',
     accountName: bankCfg.accountName || '',
-    amount: amount ?? DB?.settings?.termFee ?? 0,
-    memberName
+    amount: amtNum,
+    customMemo: initialMemo
   });
 
   const modal = $('#qrModal');
@@ -302,17 +314,35 @@ function openMemberQr(memberName, amount) {
       <button id="qrCloseBtn" class="press w-full rounded-xl bg-[var(--accent)] py-2.5 text-[14px] font-semibold text-[var(--on-accent)]">Đóng</button>
     `;
   } else {
-    const amtNum = Math.max(0, Math.round(Number(amount ?? DB?.settings?.termFee ?? 0)));
     box.innerHTML = `
       <h3 class="text-[17px] font-bold">Mã QR · ${escapeHtml(memberName)}</h3>
       <p class="text-[13px] text-[var(--text-2)]">
         ${escapeHtml((bankCfg.bankCode || 'BIDV').toUpperCase())} · <span class="font-mono font-semibold">${escapeHtml(bankCfg.accountNo)}</span>
       </p>
       <p class="text-[16px] font-bold text-[var(--income)] tabular-nums">${fmtMoney(amtNum)}</p>
-      <img src="${url}" alt="VietQR" class="mx-auto h-64 w-64 rounded-xl border border-[var(--border)] object-contain bg-white" />
-      <p class="text-[11px] text-[var(--text-3)]">Nội dung: NOP QUY - ${escapeHtml(stripVietnamese(memberName).toUpperCase())}</p>
+      <img id="qrModalImg" src="${url}" alt="VietQR" class="mx-auto h-64 w-64 rounded-xl border border-[var(--border)] object-contain bg-white" />
+      <div class="text-left">
+        <label class="text-[11px] text-[var(--text-3)]">Nội dung chuyển khoản (thủ quỹ có thể sửa hoặc xoá trống)</label>
+        <input id="qrCustomMemoInput" type="text" maxlength="50" value="${escapeHtml(initialMemo)}"
+          placeholder="Để trống nếu muốn người nộp tự nhập"
+          class="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[13px] uppercase outline-none" />
+      </div>
       <button id="qrCloseBtn" class="press w-full rounded-xl bg-[var(--accent)] py-2.5 text-[14px] font-semibold text-[var(--on-accent)]">Đóng</button>
     `;
+    const memoInp = $('#qrCustomMemoInput');
+    const qrImg = $('#qrModalImg');
+    if (memoInp && qrImg) {
+      memoInp.oninput = () => {
+        const cleanMemo = stripVietnamese(memoInp.value).toUpperCase().slice(0, 50);
+        qrImg.src = buildVietQrUrl({
+          bankCode: bankCfg.bankCode || 'BIDV',
+          accountNo: bankCfg.accountNo || '',
+          accountName: bankCfg.accountName || '',
+          amount: amtNum,
+          customMemo: cleanMemo
+        });
+      };
+    }
   }
   modal.hidden = false;
   $('#qrCloseBtn').onclick = () => { modal.hidden = true; };
@@ -499,7 +529,7 @@ function emptyDB() {
       termFee: 50000,
       hideBalance: false,
       adminPin: '1234',
-      bank: { bankCode: 'BIDV', accountNo: '', accountName: '' }
+      bank: { bankCode: 'BIDV', accountNo: '', accountName: '', transferNote: 'NOP QUY - {ten}' }
     },
     _updatedAt: Date.now()
   };
@@ -1373,6 +1403,25 @@ function renderSettings() {
           value="${escapeHtml(bank.accountName || '')}"
           class="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[14px] uppercase outline-none" />
       </div>
+      <div>
+        <label class="text-[12px] text-[var(--text-2)]">Nội dung chuyển khoản mặc định</label>
+        <input id="setBankNote" type="text" maxlength="50" placeholder="VD: NOP QUY - {ten} (hoặc để trống)"
+          value="${escapeHtml(bank.transferNote !== undefined ? bank.transferNote : 'NOP QUY - {ten}')}"
+          class="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[14px] uppercase outline-none" />
+        <p class="mt-1 text-[11px] text-[var(--text-3)]">Dùng <b>{ten}</b> để tự chèn tên bạn nộp quỹ, hoặc xoá trắng để người chuyển tự nhập.</p>
+      </div>
+      <div id="setBankQrPreviewWrap" class="pt-1 ${bank.accountNo ? '' : 'hidden'}">
+        <p class="text-[11px] text-[var(--text-3)] mb-1.5 text-center">Xem trước mã VietQR mẫu</p>
+        <img id="setBankQrPreview" alt="VietQR Preview"
+          src="${bank.accountNo ? buildVietQrUrl({
+            bankCode: currentBankCode,
+            accountNo: bank.accountNo,
+            accountName: bank.accountName || '',
+            amount: DB.settings.termFee || 0,
+            customMemo: formatTransferMemo(bank.transferNote !== undefined ? bank.transferNote : 'NOP QUY - {ten}', 'NGUYEN VAN A')
+          }) : ''}"
+          class="mx-auto h-44 w-44 rounded-xl border border-[var(--border)] bg-white object-contain" />
+      </div>
     </section>
 
     <section class="card p-4 space-y-2.5">
@@ -1454,6 +1503,7 @@ function wireView() {
   const bankCustom = $('#setBankCustom');
   const bankAcc = $('#setBankAcc');
   const bankHolder = $('#setBankHolder');
+  const bankNote = $('#setBankNote');
   const adminPin = $('#setAdminPin');
 
   const syncBankSettings = () => {
@@ -1461,12 +1511,32 @@ function wireView() {
     const chosen = bankSel?.value === 'OTHER'
       ? (bankCustom?.value || 'BIDV').trim().toUpperCase()
       : (bankSel?.value || 'BIDV');
+    const acc = (bankAcc?.value || '').trim();
+    const holder = (bankHolder?.value || '').trim().toUpperCase();
+    const noteTpl = (bankNote?.value ?? '').trim().toUpperCase();
     DB.settings.bank = {
       bankCode: chosen || 'BIDV',
-      accountNo: (bankAcc?.value || '').trim(),
-      accountName: (bankHolder?.value || '').trim().toUpperCase()
+      accountNo: acc,
+      accountName: holder,
+      transferNote: noteTpl
     };
     saveDB();
+    const prevWrap = $('#setBankQrPreviewWrap');
+    const prevImg = $('#setBankQrPreview');
+    if (prevWrap && prevImg) {
+      if (acc) {
+        prevWrap.classList.remove('hidden');
+        prevImg.src = buildVietQrUrl({
+          bankCode: chosen || 'BIDV',
+          accountNo: acc,
+          accountName: holder,
+          amount: DB.settings.termFee || 0,
+          customMemo: formatTransferMemo(noteTpl, 'NGUYEN VAN A')
+        });
+      } else {
+        prevWrap.classList.add('hidden');
+      }
+    }
   };
 
   if (bankSel) {
@@ -1478,6 +1548,7 @@ function wireView() {
   if (bankCustom) bankCustom.onchange = syncBankSettings;
   if (bankAcc) bankAcc.onchange = syncBankSettings;
   if (bankHolder) bankHolder.onchange = syncBankSettings;
+  if (bankNote) bankNote.onchange = syncBankSettings;
   if (adminPin) {
     adminPin.onchange = (e) => {
       if (!requirePinIfNeeded()) return;
