@@ -77,6 +77,16 @@
   }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
   [hidden] { display: none !important; }
+  #qrModal:not([hidden]) {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 2147483647 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 1rem !important;
+    transform: translateZ(0) !important;
+  }
 </style>
 </head>
 
