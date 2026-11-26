@@ -5,7 +5,7 @@
 <!-- Đã chặn zoom màn hình -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>Sổ Quỹ Lớp</title>
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest.json" crossorigin="use-credentials">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2921/2921222.png">
@@ -154,7 +154,19 @@
 
 <script>
 /* ============================================================
-   0. SERVICE WORKER + FIREBASE REALTIME + VIETQR CONFIG
+   0. DOM HELPERS (KHAI BÁO ĐẦU TIÊN ĐỂ TRÁNH TDZ)
+============================================================ */
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const fmt = n => Math.round(n).toLocaleString('vi-VN');
+const fmtMoney = n => fmt(n) + 'đ';
+const fmtDiff = d => (d > 0 ? '+' : d < 0 ? '−' : '') + fmt(Math.abs(d)) + 'đ';
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+/* ============================================================
+   1. SERVICE WORKER + FIREBASE REALTIME + VIETQR CONFIG
 ============================================================ */
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => {
@@ -162,14 +174,13 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   });
 }
 
-// Điền thông số Firebase Web App của bạn vào đây để bật đồng bộ Realtime đa thiết bị
 const FIREBASE_CONFIG = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyDIXVlSVUZraFH1kWr6aX1eTEDkllMU0nk",
+  authDomain: "so-quy-lop.firebaseapp.com",
+  projectId: "so-quy-lop",
+  storageBucket: "so-quy-lop.firebasestorage.app",
+  messagingSenderId: "751184406875",
+  appId: "1:751184406875:web:5ac921e3353987ce38d27e"
 };
 
 const BANK_OPTIONS = [
@@ -306,20 +317,12 @@ function openMemberQr(memberName, amount) {
   modal.hidden = false;
   $('#qrCloseBtn').onclick = () => { modal.hidden = true; };
 }
-$('#qrBackdrop').onclick = () => { $('#qrModal').hidden = true; };
+const qrBackdropEl = $('#qrBackdrop');
+if (qrBackdropEl) qrBackdropEl.onclick = () => { $('#qrModal').hidden = true; };
 
 /* ============================================================
-   1. UTILS + SAFE STORAGE
+   2. DATE / IMAGE / SAFE STORAGE / TOAST
 ============================================================ */
-const $ = (sel, root = document) => root.querySelector(sel);
-const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
-const fmt = n => Math.round(n).toLocaleString('vi-VN');
-const fmtMoney = n => fmt(n) + 'đ';
-const fmtDiff = d => (d > 0 ? '+' : d < 0 ? '−' : '') + fmt(Math.abs(d)) + 'đ';
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-
 const VI_DAYS = ['CN','Thứ Hai','Thứ Ba','Thứ Tư','Thứ Năm','Thứ Sáu','Thứ Bảy'];
 
 function formatDateVN(iso) {
@@ -425,7 +428,7 @@ function fallbackCopy(text) {
 }
 
 /* ============================================================
-   2. AUTH
+   3. AUTH
 ============================================================ */
 const AUTH_USERS_KEY = 'siquy-users';
 const SESSION_KEY    = 'siquy-session';
@@ -481,7 +484,7 @@ function userDBKey(username) { return DB_KEY_PREFIX + username.toLowerCase(); }
 let currentUser = null;
 
 /* ============================================================
-   3. DB + BACKUP / RESTORE JSON
+   4. DB + BACKUP / RESTORE JSON
 ============================================================ */
 function emptyDB() {
   return {
@@ -578,7 +581,7 @@ function handleRestoreFile(file) {
 }
 
 /* ============================================================
-   4. CATEGORIES & COMPUTATIONS
+   5. CATEGORIES & COMPUTATIONS
 ============================================================ */
 const CATEGORIES = {
   in: [
@@ -663,7 +666,7 @@ function membersStats() {
 }
 
 /* ============================================================
-   5. APPBAR / NAV / THEME
+   6. APPBAR / NAV / THEME
 ============================================================ */
 const VIEW_TITLES = { home: 'Sổ Quỹ Lớp', ledger: 'Sổ quỹ', check: 'Kiểm đếm', reports: 'Báo cáo', settings: 'Cài đặt' };
 const THEMES = [
@@ -748,7 +751,7 @@ function renderNav() {
 }
 
 /* ============================================================
-   6. ROUTER
+   7. ROUTER
 ============================================================ */
 function navigate(view) { currentView = view; render(); window.scrollTo(0, 0); }
 function render() {
@@ -761,7 +764,7 @@ function render() {
 }
 
 /* ============================================================
-   7. VIEW: HOME
+   8. VIEW: HOME
 ============================================================ */
 function renderHome() {
   const bal = balance();
@@ -910,7 +913,7 @@ function txItemHTML(t) {
 }
 
 /* ============================================================
-   8. VIEW: LEDGER
+   9. VIEW: LEDGER
 ============================================================ */
 const ledgerFilter = { type: 'all', account: 'all', month: 'current', q: '' };
 
@@ -995,7 +998,7 @@ function chip(group, val, label) {
 }
 
 /* ============================================================
-   9. VIEW: CHECK
+   10. VIEW: CHECK
 ============================================================ */
 const checkState = { mode: 'direct', actual: 0, denoms: {}, note: '', editing: false };
 
@@ -1186,7 +1189,7 @@ function checkHistoryHTML() {
 }
 
 /* ============================================================
-   10. VIEW: REPORTS
+   11. VIEW: REPORTS
 ============================================================ */
 let reportMonth = 'current';
 
@@ -1309,7 +1312,7 @@ function donutChartHTML(catMap, type) {
 }
 
 /* ============================================================
-   11. VIEW: SETTINGS
+   12. VIEW: SETTINGS
 ============================================================ */
 function renderSettings() {
   const initial = (currentUser.username || '?')[0].toUpperCase();
@@ -1421,13 +1424,13 @@ function renderSettings() {
       <input id="restoreJsonInput" type="file" accept="application/json,.json" />
       <button data-act="clear-data" class="press w-full rounded-lg border border-[var(--border)] py-2.5 text-[13px] font-medium">🔄 Xoá toàn bộ dữ liệu (bắt đầu lại)</button>
       <button data-act="delete-account" class="press w-full rounded-lg border border-[var(--warn)] py-2.5 text-[13px] font-medium text-[var(--warn)]">🗑️ Xoá tài khoản</button>
-      <p class="pt-2 text-center text-[11px] text-[var(--text-3)]">Lưu cục bộ + đồng bộ đám mây khi bật Firebase</p>
+      <p class="pt-2 text-center text-[11px] text-[var(--text-3)]">Lưu cục bộ + đồng bộ đám mây qua Firebase (so-quy-lop)</p>
     </section>
   </div>`;
 }
 
 /* ============================================================
-   12. WIRE VIEW
+   13. WIRE VIEW
 ============================================================ */
 function wireView() {
   const v = $('#view');
@@ -1587,7 +1590,7 @@ function saveCheck() {
 }
 
 /* ============================================================
-   13. GLOBAL ACTION HANDLER
+   14. GLOBAL ACTION HANDLER
 ============================================================ */
 document.addEventListener('click', (e) => {
   const menu = $('#themeMenu');
@@ -1663,7 +1666,7 @@ document.addEventListener('click', (e) => {
 $('#fab').onclick = () => { if (requirePinIfNeeded()) openCaptureSheet(); };
 
 /* ============================================================
-   14. SHEET: QUICK CAPTURE
+   15. SHEET: QUICK CAPTURE
 ============================================================ */
 const sheetState = {
   type: 'in', amount: 0, category: null, account: 'cash',
@@ -1934,7 +1937,7 @@ function saveCapture() {
 }
 
 /* ============================================================
-   15. SHEET: MEMBERS + VIETQR
+   16. SHEET: MEMBERS + VIETQR
 ============================================================ */
 function openMembersSheet() { renderMembersSheet(); showSheet(); }
 
@@ -2077,7 +2080,7 @@ function importMembers() {
 }
 
 /* ============================================================
-   16. SHEET: INBOX
+   17. SHEET: INBOX
 ============================================================ */
 function openInboxSheet() { renderInboxSheet(); showSheet(); }
 
@@ -2143,7 +2146,7 @@ function renderInboxSheet() {
 }
 
 /* ============================================================
-   17. SHEET: SHOW/CLOSE
+   18. SHEET: SHOW/CLOSE
 ============================================================ */
 function showSheet() { $('#sheetOverlay').classList.add('open'); document.body.style.overflow = 'hidden'; }
 function closeSheet() { $('#sheetOverlay').classList.remove('open'); document.body.style.overflow = ''; }
@@ -2154,7 +2157,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ============================================================
-   18. EXPORT CSV
+   19. EXPORT CSV
 ============================================================ */
 function exportCSV() {
   if (DB.transactions.length === 0) { toast('Chưa có giao dịch nào để xuất'); return; }
@@ -2181,7 +2184,7 @@ function exportCSV() {
 }
 
 /* ============================================================
-   19. VIEWS + INIT
+   20. VIEWS + INIT
 ============================================================ */
 const VIEWS = {
   home: renderHome, ledger: renderLedger, check: renderCheck,

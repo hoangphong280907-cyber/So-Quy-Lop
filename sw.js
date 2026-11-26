@@ -1,4 +1,4 @@
-const CACHE_NAME = 'so-quy-lop-v2';
+const CACHE_NAME = 'so-quy-lop-v3';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
