@@ -64,7 +64,11 @@
   #sheetOverlay.open #sheetContent { transform: translateY(0); }
   #sheetOverlay.guest-locked { z-index: 60 !important; }
   #sheetOverlay.guest-locked #sheetBackdrop { background: rgba(0, 0, 0, 0.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-  #sheetOverlay.guest-locked #sheetContent { max-height: 94dvh; }
+  #sheetOverlay.guest-locked #sheetContent { max-height: 92dvh; min-height: 0; }
+  @media (max-width: 767px) {
+    #sheetOverlay.guest-locked { align-items: flex-end; }
+    #sheetOverlay.guest-locked #sheetContent { border-bottom-left-radius: 0; border-bottom-right-radius: 0; max-height: 90dvh; }
+  }
   @media (min-width: 768px) {
     #sheetContent { transform: scale(.96); opacity: 0; transition: transform .25s ease, opacity .25s ease; }
     #sheetOverlay.open #sheetContent { transform: scale(1); opacity: 1; }
@@ -211,10 +215,6 @@ let isPublicGuestMode = false;
 const DEFAULT_SHARED_ROOM = 'lop_chinh';
 
 function getRoomId() {
-  const paramRoom = new URLSearchParams(location.search).get('room');
-  if (paramRoom && paramRoom.trim()) {
-    return paramRoom.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-  }
   return DEFAULT_SHARED_ROOM;
 }
 
@@ -258,7 +258,14 @@ function initRealtimeSync() {
       if (currentUser || isPublicGuestMode) {
         render();
         if (isGuestLocked()) {
+          const prevQ = $('#memberSearchInp')?.value || '';
+          const hadFocus = document.activeElement?.id === 'memberSearchInp';
           openMembersSheet();
+          if (prevQ && $('#memberSearchInp')) {
+            $('#memberSearchInp').value = prevQ;
+            $('#memberSearchInp').dispatchEvent(new Event('input'));
+            if (hadFocus) $('#memberSearchInp').focus();
+          }
         } else if ($('#sheetOverlay')?.classList.contains('open')) {
           renderMembersSheet();
         }
@@ -1072,6 +1079,9 @@ function render() {
   $('#view').innerHTML = fn();
   wireView();
   renderNav();
+  if (isGuestLocked() && !$('#sheetOverlay')?.classList.contains('open')) {
+    openMembersSheet();
+  }
 }
 
 /* ============================================================
@@ -2813,6 +2823,15 @@ function init() {
 }
 
 init();
+
+function syncOnResume() {
+  if (document.hidden) return;
+  if (isGuestLocked() || currentUser) {
+    initRealtimeSync();
+  }
+}
+document.addEventListener('visibilitychange', syncOnResume);
+window.addEventListener('pageshow', syncOnResume);
 </script>
 </body>
 </html>
