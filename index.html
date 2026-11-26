@@ -247,7 +247,11 @@ function initRealtimeSync() {
       document.documentElement.dataset.theme = DB.settings.theme || 'giay-cu';
       if (currentUser || isPublicGuestMode) {
         render();
-        if ($('#sheetOverlay')?.classList.contains('open')) renderMembersSheet();
+        if (isGuestLocked() && !$('#sheetOverlay')?.classList.contains('open')) {
+          openMembersSheet();
+        } else if ($('#sheetOverlay')?.classList.contains('open')) {
+          renderMembersSheet();
+        }
       }
       isApplyingRemoteSnapshot = false;
     }, (err) => console.warn('Firestore sync:', err));
@@ -257,9 +261,14 @@ function initRealtimeSync() {
   }
 }
 
-function pushCloudDB() {
+function isGuestLocked() {
+  return isViewOnlyMode() && !isAdminUnlocked;
+}
+
+function pushCloudDB(forceAllow = false) {
   if (isApplyingRemoteSnapshot || !DB) return;
   if (!currentUser && !isPublicGuestMode) return;
+  if (isGuestLocked() && !forceAllow) return;
   try {
     const dbInst = ensureFirestoreInstance();
     if (!dbInst) return;
@@ -279,6 +288,7 @@ function enterPublicGuestView() {
   balanceHidden = false;
   showAppShell();
   render();
+  openMembersSheet();
   initRealtimeSync();
 }
 
@@ -391,13 +401,17 @@ function reportMemberTransfer(memberId) {
   if (!DB || !memberId) return;
   const m = DB.members.find(x => x.id === memberId);
   if (!m) return;
-  if (DB.memberPaid[memberId]) {
+  if (isMemberPaidToday(memberId)) {
     toast(`${m.name} đã được xác nhận đóng quỹ rồi`, 'var(--income)');
     return;
   }
   DB.memberPending = DB.memberPending && typeof DB.memberPending === 'object' ? DB.memberPending : {};
   DB.memberPending[memberId] = Date.now();
-  saveDB();
+  DB._updatedAt = Date.now();
+  if (currentUser && !isPublicGuestMode) {
+    safeStorage.setItem(userDBKey(currentUser.username), JSON.stringify(DB));
+  }
+  pushCloudDB(true);
   toast(`Đã gửi báo chuyển khoản cho ${m.name} — chờ thủ quỹ duyệt`, 'var(--income)');
   if ($('#sheetOverlay')?.classList.contains('open')) renderMembersSheet();
   if (currentView === 'home') render();
@@ -996,6 +1010,18 @@ const NAV_ITEMS = [
 ];
 
 function renderNav() {
+  if (isGuestLocked()) {
+    $('#bottomnav').innerHTML = `
+      <div class="flex h-16 items-center justify-between px-4 gap-3">
+        <button data-act="open-members" class="press flex-1 rounded-xl bg-[var(--accent)] py-2.5 text-[13px] font-semibold text-[var(--on-accent)]">
+          👥 Xem danh sách · QR · Báo đã CK
+        </button>
+        <button data-act="unlock-pin" class="press rounded-xl border border-[var(--border)] px-3 py-2.5 text-[12px] font-medium text-[var(--text-2)]">
+          🔒 PIN thủ quỹ
+        </button>
+      </div>`;
+    return;
+  }
   $('#bottomnav').innerHTML = `
     <ul class="grid h-16 grid-cols-5">
       ${NAV_ITEMS.map(n => {
@@ -1017,7 +1043,14 @@ function renderNav() {
 /* ============================================================
    7. ROUTER
 ============================================================ */
-function navigate(view) { currentView = view; render(); window.scrollTo(0, 0); }
+function navigate(view) {
+  if (isGuestLocked() && view !== 'home') {
+    if (!requirePinIfNeeded()) return;
+  }
+  currentView = view;
+  render();
+  window.scrollTo(0, 0);
+}
 function render() {
   if (!currentUser) return;
   renderAppbar();
@@ -1928,10 +1961,13 @@ document.addEventListener('click', (e) => {
   const a = act.dataset.act;
   const id = act.dataset.id;
   switch (a) {
+    case 'unlock-pin':
+      if (requirePinIfNeeded()) { render(); }
+      return;
     case 'toggle-balance':
       balanceHidden = !balanceHidden;
-      DB.settings.hideBalance = balanceHidden;
-      saveDB(); render();
+      if (!isGuestLocked()) DB.settings.hideBalance = balanceHidden;
+      render();
       return;
     case 'open-capture': if (requirePinIfNeeded()) openCaptureSheet(); return;
     case 'go-check': navigate('check'); return;
@@ -1982,7 +2018,11 @@ document.addEventListener('click', (e) => {
   }
 });
 
-$('#fab').onclick = () => { if (requirePinIfNeeded()) openCaptureSheet(); };
+const fabEl = $('#fab');
+if (fabEl) {
+  fabEl.classList.toggle('hidden', isGuestLocked());
+  fabEl.onclick = () => { if (requirePinIfNeeded()) openCaptureSheet(); };
+}
 
 /* ============================================================
    15. SHEET: QUICK CAPTURE
@@ -2282,28 +2322,35 @@ function renderMemberRowsHtml(list, query = '') {
       const paidAmtStr = (paid && typeof paidObj === 'object' && typeof paidObj.amount === 'number') ? ` · ${fmtMoney(paidObj.amount)}` : '';
       const pending = !paid && !!DB.memberPending?.[m.id];
       const canEditDirectly = !isViewOnlyMode() || isAdminUnlocked;
-      return `<li class="flex items-center gap-1.5 py-2.5">
-        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[12px] font-semibold">${escapeHtml(m.code || m.name[0])}</span>
-        <div class="min-w-0 flex-1">
-          <p class="truncate text-[14px]">${escapeHtml(m.name)}</p>
-          ${paid
-            ? `<p class="text-[11px] font-mono text-[var(--income)]">🕒 ${escapeHtml(paidTimeStr)}${escapeHtml(paidAmtStr)}</p>`
-            : (pending ? `<p class="text-[11px] font-medium text-[var(--expense)]">⏳ Chờ duyệt CK</p>` : `<p class="text-[11px] font-mono text-[var(--text-3)]">${escapeHtml(m.code || '')}</p>`)}
+      const guestMode = isGuestLocked();
+      return `<li class="flex items-center justify-between gap-2 py-2.5">
+        <div class="flex min-w-0 flex-1 items-center gap-2.5">
+          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[12px] font-semibold">${escapeHtml(m.code || m.name[0])}</span>
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-[14px] font-medium">${escapeHtml(m.name)}</p>
+            ${guestMode
+              ? `<p class="text-[11px] font-mono text-[var(--text-3)]">${escapeHtml(m.code || '')}${pending ? ' · Đã gửi báo CK' : ''}</p>`
+              : (paid
+                ? `<p class="text-[11px] font-mono text-[var(--income)]">🕒 ${escapeHtml(paidTimeStr)}${escapeHtml(paidAmtStr)}</p>`
+                : (pending ? `<p class="text-[11px] font-medium text-[var(--expense)]">⏳ Chờ duyệt CK</p>` : `<p class="text-[11px] font-mono text-[var(--text-3)]">${escapeHtml(m.code || '')}</p>`))}
+          </div>
         </div>
-        ${!paid ? `<button data-qr-member="${m.id}" class="press rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--accent)]">QR</button>` : ''}
-        ${(!paid && !canEditDirectly)
-          ? `<button data-report-member="${m.id}" class="press rounded-lg px-2.5 py-1.5 text-[12px] font-medium ${pending ? 'bg-[var(--draft-bg)] text-[var(--expense)] border border-[var(--expense)]' : 'bg-[var(--accent-soft)] text-[var(--income)]'}">
-              ${pending ? 'Đã báo CK' : 'Báo đã CK'}
-            </button>`
-          : ''}
-        <button data-toggle-member="${m.id}" class="press rounded-lg px-2.5 py-1.5 text-[12px] font-medium
-          ${paid
-            ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-            : (pending ? 'bg-[var(--expense)] text-white' : 'bg-[var(--surface-2)] text-[var(--text-2)]')}">
-          ${paid ? '✓ Đã đóng' : (pending ? 'Duyệt ✓' : 'Chưa đóng')}
-        </button>
-        <button data-remove-member="${m.id}" aria-label="Xoá thành viên"
-          class="press flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--warn)]">×</button>
+        <div class="flex shrink-0 items-center gap-1.5">
+          ${(guestMode || !paid) ? `<button data-qr-member="${m.id}" class="press rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-1.5 text-[12px] font-semibold text-[var(--accent)]">QR</button>` : ''}
+          ${guestMode
+            ? `<button data-report-member="${m.id}" class="press rounded-lg px-3 py-1.5 text-[12px] font-semibold ${pending ? 'border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-2)]' : 'bg-[var(--accent)] text-[var(--on-accent)]'}">
+                ${pending ? 'Đã báo CK' : 'Tôi đã chuyển khoản'}
+              </button>`
+            : `
+              <button data-toggle-member="${m.id}" class="press rounded-lg px-2.5 py-1.5 text-[12px] font-medium
+                ${paid
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                  : (pending ? 'bg-[var(--expense)] text-white' : 'bg-[var(--surface-2)] text-[var(--text-2)]')}">
+                ${paid ? '✓ Đã đóng' : (pending ? 'Duyệt ✓' : 'Chưa đóng')}
+              </button>
+              <button data-remove-member="${m.id}" aria-label="Xoá thành viên"
+                class="press flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--warn)]">×</button>`}
+        </div>
       </li>`;
     }).join('')}
   </ul>`;
@@ -2349,6 +2396,7 @@ function wireMemberRowEvents(container) {
 
 function renderMembersSheet() {
   checkDailyMemberReset(true);
+  if (isGuestLocked()) memberFilterTab = 'all';
   const stats = membersStats();
   const logs = Array.isArray(DB.paymentLogs) ? DB.paymentLogs : [];
   const filteredMembers = DB.members.filter(m => {
@@ -2363,13 +2411,15 @@ function renderMembersSheet() {
     <div class="flex justify-center pt-2.5 md:hidden"><span class="h-1.5 w-10 rounded-full bg-[var(--border)]"></span></div>
     <header class="flex items-center justify-between px-5 pb-2 pt-3">
       <div>
-        <h1 class="text-[18px] font-semibold">Thành viên lớp · ${formatDateVN(todayISO())}</h1>
-        <p class="text-[12px] text-[var(--text-3)]">Mức quỹ: ${fmtMoney(DB.settings.termFee)} · ${DB.settings.dailyResetMembers !== false ? 'Tự làm mới mỗi ngày' : 'Giữ trạng thái theo đợt'}</p>
+        <h1 class="text-[18px] font-semibold">${isGuestLocked() ? 'Đóng quỹ lớp' : `Thành viên lớp · ${formatDateVN(todayISO())}`}</h1>
+        <p class="text-[12px] text-[var(--text-3)]">${isGuestLocked()
+          ? `Mức quỹ: ${fmtMoney(DB.settings.termFee)} · Chọn QR để chuyển tiền rồi bấm Tôi đã chuyển khoản`
+          : `Mức quỹ: ${fmtMoney(DB.settings.termFee)} · ${DB.settings.dailyResetMembers !== false ? 'Tự làm mới mỗi ngày' : 'Giữ trạng thái theo đợt'}`}</p>
       </div>
-      <button data-sheet-close class="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-2)] hover:bg-[var(--surface-2)]">✕</button>
+      ${!isGuestLocked() ? `<button data-sheet-close class="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-2)] hover:bg-[var(--surface-2)]">✕</button>` : ''}
     </header>
 
-    ${stats.total > 0 ? `
+    ${!isGuestLocked() && stats.total > 0 ? `
     <div class="mx-5 flex items-center gap-2 rounded-xl bg-[var(--surface-2)] p-3">
       <div class="flex-1 text-center"><p class="text-[20px] font-bold text-[var(--income)] tabular-nums">${stats.paid}</p><p class="text-[11px] text-[var(--text-3)]">Đã đóng</p></div>
       <div class="h-8 w-px bg-[var(--border)]"></div>
@@ -2378,6 +2428,7 @@ function renderMembersSheet() {
       <div class="flex-1 text-center"><p class="text-[20px] font-bold tabular-nums">${stats.total}</p><p class="text-[11px] text-[var(--text-3)]">Tổng</p></div>
     </div>` : ''}
 
+    ${!isGuestLocked() ? `
     <div class="mx-5 mt-2.5 flex gap-1.5 overflow-x-auto pb-1">
       ${[
         { id: 'all', label: `Tất cả (${stats.total})` },
@@ -2389,7 +2440,7 @@ function renderMembersSheet() {
           ${memberFilterTab === tab.id ? 'bg-[var(--accent)] text-[var(--on-accent)]' : 'bg-[var(--surface-2)] text-[var(--text-2)]'}">
           ${tab.label}
         </button>`).join('')}
-    </div>
+    </div>` : ''}
 
     ${memberFilterTab !== 'logs' && DB.members.length > 0 ? `
     <div class="mx-5 mt-2">
@@ -2425,6 +2476,7 @@ function renderMembersSheet() {
               </div>`
             : `<div id="memberRowsContainer">${renderMemberRowsHtml(filteredMembers, '')}</div>`)}
 
+      ${!isGuestLocked() ? `
       <div class="mt-4 flex gap-2">
         <input id="newMemberName" type="text" placeholder="Tên thành viên mới" maxlength="40"
           class="flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[14px] outline-none placeholder:text-[var(--text-3)]" />
@@ -2432,12 +2484,13 @@ function renderMembersSheet() {
       </div>
       <button data-import-members class="mt-2 w-full rounded-xl border border-[var(--border)] py-2 text-[12px] text-[var(--text-2)]">
         📋 Dán danh sách (mỗi dòng một tên)
-      </button>
+      </button>` : ''}
     </div>
 
+    ${!isGuestLocked() ? `
     <footer class="border-t border-[var(--border)] px-5 py-3" style="padding-bottom:max(0.75rem,env(safe-area-inset-bottom))">
       <button data-copy-debt class="press w-full rounded-xl bg-[var(--accent)] py-3 text-[14px] font-semibold text-[var(--on-accent)]">📋 Copy tin nhắc nợ</button>
-    </footer>`;
+    </footer>` : ''}`;
 
   $$('[data-member-tab]', el).forEach(btn => { btn.onclick = () => { memberFilterTab = btn.dataset.memberTab; renderMembersSheet(); }; });
 
@@ -2453,11 +2506,15 @@ function renderMembersSheet() {
     }
   }
 
-  $('#addMemberBtn', el).onclick = addMemberFromInput;
-  $('#newMemberName', el).onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addMemberFromInput(); } };
-  $('[data-import-members]', el).onclick = importMembers;
-
-  $('[data-copy-debt]', el).onclick = () => {
+  const addBtn = $('#addMemberBtn', el);
+  const newNameInp = $('#newMemberName', el);
+  const importBtn = $('[data-import-members]', el);
+  const copyDebtBtn = $('[data-copy-debt]', el);
+  if (addBtn) addBtn.onclick = addMemberFromInput;
+  if (newNameInp) newNameInp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addMemberFromInput(); } };
+  if (importBtn) importBtn.onclick = importMembers;
+  if (copyDebtBtn) {
+    copyDebtBtn.onclick = () => {
     const unpaid = DB.members.filter(m => !isMemberPaidToday(m.id)).map(m => m.name);
     if (DB.members.length === 0) { toast('Chưa có thành viên nào để nhắc'); return; }
     if (unpaid.length === 0) { toast('Cả lớp đã đóng đủ 🎉', 'var(--income)'); return; }
