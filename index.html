@@ -208,10 +208,14 @@ let isAdminUnlocked = sessionStorage.getItem('sq_pin_ok') === '1';
 let isApplyingRemoteSnapshot = false;
 let isPublicGuestMode = false;
 
+const DEFAULT_SHARED_ROOM = 'lop_chinh';
+
 function getRoomId() {
   const paramRoom = new URLSearchParams(location.search).get('room');
-  if (paramRoom) return paramRoom.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-  return currentUser ? `user_${currentUser.username.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}` : 'default_room';
+  if (paramRoom && paramRoom.trim()) {
+    return paramRoom.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  }
+  return DEFAULT_SHARED_ROOM;
 }
 
 function isViewOnlyMode() {
@@ -253,7 +257,7 @@ function initRealtimeSync() {
       document.documentElement.dataset.theme = DB.settings.theme || 'giay-cu';
       if (currentUser || isPublicGuestMode) {
         render();
-        if (isGuestLocked() && !$('#sheetOverlay')?.classList.contains('open')) {
+        if (isGuestLocked()) {
           openMembersSheet();
         } else if ($('#sheetOverlay')?.classList.contains('open')) {
           renderMembersSheet();
@@ -2659,9 +2663,11 @@ function renderInboxSheet() {
 ============================================================ */
 function showSheet() {
   const ov = $('#sheetOverlay');
-  ov.classList.toggle('guest-locked', isGuestLocked());
+  const locked = isGuestLocked();
+  ov.classList.toggle('guest-locked', locked);
   ov.classList.add('open');
   document.body.style.overflow = 'hidden';
+  if (fabEl) fabEl.classList.toggle('hidden', locked);
 }
 function closeSheet() {
   if (isGuestLocked()) return;
