@@ -61,9 +61,12 @@
   #sheetOverlay.open { opacity: 1; pointer-events: auto; }
   #sheetContent { transform: translateY(100%); transition: transform .32s cubic-bezier(.2,.9,.3,1); }
   #sheetOverlay.open #sheetContent { transform: translateY(0); }
+  #sheetOverlay.guest-locked #sheetBackdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
   @media (min-width: 768px) {
     #sheetContent { transform: scale(.96); opacity: 0; transition: transform .25s ease, opacity .25s ease; }
     #sheetOverlay.open #sheetContent { transform: scale(1); opacity: 1; }
+    #sheetOverlay.guest-locked { justify-content: flex-end !important; padding-right: 2rem; }
+    #sheetOverlay.guest-locked #sheetContent { width: 410px; max-width: 410px; border-radius: 1.5rem; max-height: 88dvh; }
   }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
   [hidden] { display: none !important; }
@@ -2056,6 +2059,7 @@ function openCaptureSheet(editId = null) {
 
 function renderCaptureSheet() {
   const isEdit = !!sheetState.editId;
+  $('#sheetOverlay')?.classList.toggle('guest-locked', isGuestLocked());
   const el = $('#sheetContent');
   el.innerHTML = `
     <div class="flex justify-center pt-2.5 md:hidden"><span class="h-1.5 w-10 rounded-full bg-[var(--border)]"></span></div>
@@ -2336,9 +2340,9 @@ function renderMemberRowsHtml(list, query = '') {
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-1.5">
-          ${(guestMode || !paid) ? `<button data-qr-member="${m.id}" class="press rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-1.5 text-[12px] font-semibold text-[var(--accent)]">QR</button>` : ''}
+          ${(guestMode || !paid) ? `<button data-qr-member="${m.id}" class="press rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-1.5 text-[12px] font-semibold text-[var(--accent)] whitespace-nowrap">QR</button>` : ''}
           ${guestMode
-            ? `<button data-report-member="${m.id}" class="press rounded-lg px-3 py-1.5 text-[12px] font-semibold ${pending ? 'border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-2)]' : 'bg-[var(--accent)] text-[var(--on-accent)]'}">
+            ? `<button data-report-member="${m.id}" class="press rounded-lg px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap ${pending ? 'border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-2)]' : 'bg-[var(--accent)] text-[var(--on-accent)]'}">
                 ${pending ? 'Đã báo CK' : 'Tôi đã chuyển khoản'}
               </button>`
             : `
@@ -2627,12 +2631,22 @@ function renderInboxSheet() {
 /* ============================================================
    18. SHEET: SHOW/CLOSE
 ============================================================ */
-function showSheet() { $('#sheetOverlay').classList.add('open'); document.body.style.overflow = 'hidden'; }
-function closeSheet() { $('#sheetOverlay').classList.remove('open'); document.body.style.overflow = ''; }
-$('#sheetBackdrop').onclick = closeSheet;
-document.addEventListener('click', (e) => { if (e.target.closest('[data-sheet-close]')) closeSheet(); });
+function showSheet() {
+  const ov = $('#sheetOverlay');
+  ov.classList.toggle('guest-locked', isGuestLocked());
+  ov.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeSheet() {
+  if (isGuestLocked()) return;
+  const ov = $('#sheetOverlay');
+  ov.classList.remove('open', 'guest-locked');
+  document.body.style.overflow = '';
+}
+$('#sheetBackdrop').onclick = () => { if (!isGuestLocked()) closeSheet(); };
+document.addEventListener('click', (e) => { if (e.target.closest('[data-sheet-close]') && !isGuestLocked()) closeSheet(); });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && $('#sheetOverlay').classList.contains('open')) closeSheet();
+  if (e.key === 'Escape' && $('#sheetOverlay').classList.contains('open') && !isGuestLocked()) closeSheet();
 });
 
 /* ============================================================
