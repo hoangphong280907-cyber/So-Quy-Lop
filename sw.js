@@ -1,4 +1,4 @@
-const CACHE_NAME = 'so-quy-lop-v1.2';
+const CACHE_NAME = 'so-quy-lop-v2.2';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -23,7 +23,6 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-  // Bỏ qua các request API của Firebase để SDK tự xử lý offline persistence
   if (
     event.request.url.includes('firebaseio.com') ||
     event.request.url.includes('googleapis.com') ||

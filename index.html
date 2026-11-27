@@ -3,7 +3,6 @@
 <head>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20x%3D%2210%22%20y%3D%228%22%20width%3D%2234%22%20height%3D%2246%22%20rx%3D%225%22%20fill%3D%22%23f7f4ec%22%20stroke%3D%22%233b4d3e%22%20stroke-width%3D%223%22/%3E%3Cline%20x1%3D%2216%22%20y1%3D%2220%22%20x2%3D%2236%22%20y2%3D%2220%22%20stroke%3D%22%239aa89c%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22/%3E%3Cline%20x1%3D%2216%22%20y1%3D%2229%22%20x2%3D%2236%22%20y2%3D%2229%22%20stroke%3D%22%239aa89c%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22/%3E%3Cline%20x1%3D%2216%22%20y1%3D%2238%22%20x2%3D%2229%22%20y2%3D%2238%22%20stroke%3D%22%239aa89c%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22/%3E%3Cpath%20d%3D%22M46%2018%20L54%2026%20L33%2047%20L23%2050%20L26%2040%20Z%22%20fill%3D%22%23e08a3c%22%20stroke%3D%22%233b4d3e%22%20stroke-width%3D%222.5%22%20stroke-linejoin%3D%22round%22/%3E%3Cpath%20d%3D%22M23%2050%20L26%2040%20L30%2046%20Z%22%20fill%3D%22%232c352d%22/%3E%3C/svg%3E" />
 <meta charset="utf-8" />
-<!-- Đã chặn zoom màn hình -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>Sổ Quỹ Lớp</title>
 <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
@@ -11,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2921/2921222.png">
 <script src="https://cdn.tailwindcss.com"></script>
-<!-- SheetJS (đã precache trong sw.js để xuất Excel khi Offline) -->
+<!-- SheetJS (precache trong sw.js để xuất Excel khi Offline) -->
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <!-- Firebase Compat SDK cho Single-File HTML -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
@@ -76,11 +75,11 @@
     #sheetContent { transform: scale(.96); opacity: 0; transition: transform .25s ease, opacity .25s ease; }
     #sheetOverlay.open #sheetContent { transform: scale(1); opacity: 1; }
     #sheetOverlay.guest-locked { justify-content: flex-end !important; padding-right: 2rem; }
-    #sheetOverlay.guest-locked #sheetContent { width: 420px; max-width: 420px; border-radius: 1.5rem; max-height: 88dvh; }
+    #sheetOverlay.guest-locked #sheetContent { width: 440px; max-width: 440px; border-radius: 1.5rem; max-height: 88dvh; }
   }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
   [hidden] { display: none !important; }
-  #qrModal:not([hidden]) {
+  #qrModal:not([hidden]), #receiptModal:not([hidden]) {
     position: fixed !important;
     inset: 0 !important;
     z-index: 2147483647 !important;
@@ -139,7 +138,7 @@
     </div>
 
     <p class="mt-4 px-2 text-center text-[11px] leading-relaxed text-[var(--text-3)]">
-      Hỗ trợ lưu cục bộ Offline, xuất Excel (.xlsx), sao lưu JSON và đồng bộ Realtime qua Firebase Firestore.
+      VietQR động từng đợt thu · Đồng bộ 2 chiều Thu quỹ & Ghi nhanh · Nén hóa đơn &lt; 100KB · Xuất Excel Offline.
     </p>
   </div>
 </div>
@@ -163,21 +162,27 @@
   <div id="sheetOverlay" class="fixed inset-0 z-40 flex items-end justify-center md:items-center">
     <div id="sheetBackdrop" class="absolute inset-0 bg-black/35 backdrop-blur-[3px]"></div>
     <div id="sheetContent" role="dialog" aria-modal="true"
-         class="relative flex w-full max-h-[92dvh] flex-col rounded-t-3xl bg-[var(--surface)] shadow-2xl md:max-w-[460px] md:rounded-3xl md:max-h-[88dvh]"></div>
+         class="relative flex w-full max-h-[92dvh] flex-col rounded-t-3xl bg-[var(--surface)] shadow-2xl md:max-w-[480px] md:rounded-3xl md:max-h-[88dvh]"></div>
   </div>
 </div>
 
 <!-- Modal VietQR chuyển khoản -->
 <div id="qrModal" hidden class="fixed inset-0 flex items-center justify-center p-4" style="z-index: 75;">
   <div id="qrBackdrop" class="absolute inset-0 bg-black/45 backdrop-blur-[2px]"></div>
-  <div id="qrBox" class="card relative z-10 w-full max-w-sm p-5 text-center space-y-3"></div>
+  <div id="qrBox" class="card relative z-10 w-full max-w-sm p-5 text-center space-y-3 max-h-[92dvh] overflow-y-auto"></div>
+</div>
+
+<!-- Modal xem ảnh hóa đơn phóng to -->
+<div id="receiptModal" hidden class="fixed inset-0 flex items-center justify-center p-4" style="z-index: 76;">
+  <div id="receiptBackdrop" class="absolute inset-0 bg-black/70 backdrop-blur-[2px]"></div>
+  <div id="receiptBox" class="card relative z-10 w-full max-w-md p-4 text-center space-y-3"></div>
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 /* ============================================================
-   0. DOM HELPERS (KHAI BÁO ĐẦU TIÊN ĐỂ TRÁNH TDZ)
+   0. DOM HELPERS
 ============================================================ */
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -189,7 +194,7 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
 /* ============================================================
-   1. SERVICE WORKER + FIREBASE REALTIME & AUTH + SYNC BADGE
+   1. SERVICE WORKER + FIREBASE REALTIME & AUTH + GUEST REPORTS
 ============================================================ */
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => {
@@ -227,6 +232,8 @@ let isAdminUnlocked = sessionStorage.getItem('sq_pin_ok') === '1';
 let isApplyingRemoteSnapshot = false;
 let isPublicGuestMode = false;
 let syncBadgeState = navigator.onLine ? 'synced' : 'offline';
+let remoteGuestReports = {};
+let activeQrContext = null; // { memberId, driveId, memberName }
 
 const DEFAULT_SHARED_ROOM = 'lop_chinh';
 
@@ -303,6 +310,29 @@ function ensureFirestoreInstance() {
   return firestoreDb;
 }
 
+function mergeRemoteGuestReportsIntoDB(reportsMap) {
+  if (!DB || !reportsMap || typeof reportsMap !== 'object') return false;
+  let changed = false;
+  Object.entries(reportsMap).forEach(([key, ts]) => {
+    if (!ts) return;
+    const sepIdx = key.lastIndexOf('__');
+    if (sepIdx <= 0) return;
+    const driveId = key.slice(0, sepIdx);
+    const memberId = key.slice(sepIdx + 2);
+    const drive = getDriveById(driveId);
+    if (!drive) return;
+    const st = getMemberDriveStatus(memberId, drive.id);
+    if (st.isFullyPaid) return;
+    if (!drive.pending) drive.pending = {};
+    if (!drive.pending[memberId] || Number(ts) > Number(drive.pending[memberId])) {
+      drive.pending[memberId] = Number(ts) || Date.now();
+      changed = true;
+    }
+  });
+  syncLegacyMirrorsFromActiveDrive();
+  return changed;
+}
+
 function initRealtimeSync() {
   if (firestoreUnsub) { firestoreUnsub(); firestoreUnsub = null; }
   if (!navigator.onLine) updateSyncBadge('offline');
@@ -322,32 +352,39 @@ function initRealtimeSync() {
 
       if (!snap.exists) return;
       const remote = snap.data();
-      if (!remote || !remote.db) return;
+      if (!remote) return;
+      remoteGuestReports = (remote.guestReports && typeof remote.guestReports === 'object') ? { ...remote.guestReports } : {};
+
       const localStamp = DB?._updatedAt || 0;
-      if (!isPublicGuestMode && (remote.updatedAt || 0) <= localStamp) return;
+      const shouldApplyRemoteDb = remote.db && (isPublicGuestMode || (remote.updatedAt || 0) > localStamp);
 
       isApplyingRemoteSnapshot = true;
-      DB = normalizeDB(remote.db);
-      DB._updatedAt = remote.updatedAt || Date.now();
-      checkDailyMemberReset(false);
-      if (currentUser && !isPublicGuestMode) {
-        safeStorage.setItem(userDBKey(currentUser.username), JSON.stringify(DB));
+      if (shouldApplyRemoteDb) {
+        DB = normalizeDB(remote.db);
+        DB._updatedAt = remote.updatedAt || Date.now();
       }
-      balanceHidden = !!DB.settings.hideBalance;
-      document.documentElement.dataset.theme = DB.settings.theme || 'giay-cu';
-      if (currentUser || isPublicGuestMode) {
-        render();
-        if (isGuestLocked()) {
-          const prevQ = $('#memberSearchInp')?.value || '';
-          const hadFocus = document.activeElement?.id === 'memberSearchInp';
-          openMembersSheet();
-          if (prevQ && $('#memberSearchInp')) {
-            $('#memberSearchInp').value = prevQ;
-            $('#memberSearchInp').dispatchEvent(new Event('input'));
-            if (hadFocus) $('#memberSearchInp').focus();
+      const hasNewGuestReports = mergeRemoteGuestReportsIntoDB(remoteGuestReports);
+
+      if (shouldApplyRemoteDb || hasNewGuestReports) {
+        if (currentUser && !isPublicGuestMode) {
+          safeStorage.setItem(userDBKey(currentUser.username), JSON.stringify(DB));
+        }
+        balanceHidden = !!DB.settings.hideBalance;
+        document.documentElement.dataset.theme = DB.settings.theme || 'giay-cu';
+        if (currentUser || isPublicGuestMode) {
+          render();
+          if (isGuestLocked()) {
+            const prevQ = $('#memberSearchInp')?.value || '';
+            const hadFocus = document.activeElement?.id === 'memberSearchInp';
+            openMembersSheet();
+            if (prevQ && $('#memberSearchInp')) {
+              $('#memberSearchInp').value = prevQ;
+              $('#memberSearchInp').dispatchEvent(new Event('input'));
+              if (hadFocus) $('#memberSearchInp').focus();
+            }
+          } else if ($('#sheetOverlay')?.classList.contains('open') && $('#memberRowsContainer')) {
+            renderMembersSheet();
           }
-        } else if ($('#sheetOverlay')?.classList.contains('open')) {
-          renderMembersSheet();
         }
       }
       isApplyingRemoteSnapshot = false;
@@ -376,6 +413,7 @@ function pushCloudDB(forceAllow = false) {
     const roomId = getRoomId();
     dbInst.collection('so_quy_rooms').doc(roomId).set({
       db: DB,
+      guestReports: remoteGuestReports,
       updatedAt: DB._updatedAt || Date.now(),
       owner: currentUser ? currentUser.username : (DB._owner || 'public_room')
     }, { merge: true }).then(() => {
@@ -390,7 +428,26 @@ function pushCloudDB(forceAllow = false) {
   } catch (e) {}
 }
 
-// Helper kiểm thử bảo mật & đồng bộ từ DevTools (F12)
+// Khách tự động báo "Tôi đã CK" (ghi vào trường guestReports để Rules cho phép kể cả khi khóa ghi db chính)
+function pushGuestTransferReport(driveId, memberId, ts) {
+  const key = `${driveId}__${memberId}`;
+  if (ts) remoteGuestReports[key] = ts;
+  else delete remoteGuestReports[key];
+
+  try {
+    const dbInst = ensureFirestoreInstance();
+    if (!dbInst) return;
+    const roomId = getRoomId();
+    const fieldPath = new firebase.firestore.FieldPath('guestReports', key);
+    const val = ts ? ts : firebase.firestore.FieldValue.delete();
+    dbInst.collection('so_quy_rooms').doc(roomId).update(fieldPath, val).catch(() => {
+      dbInst.collection('so_quy_rooms').doc(roomId).set({
+        guestReports: { [key]: ts || null }
+      }, { merge: true }).catch(() => {});
+    });
+  } catch (e) {}
+}
+
 window.SoQuyCloud = {
   getFirestore: () => ensureFirestoreInstance(),
   getAuth: () => { ensureFirestoreInstance(); return firebaseAuth; },
@@ -433,6 +490,9 @@ function requirePinIfNeeded() {
   return false;
 }
 
+/* ============================================================
+   2. ĐỢT THU / SỰ KIỆN RIÊNG & ĐỒNG BỘ 2 CHIỀU THU QUỸ <-> GHI NHANH
+============================================================ */
 function stripVietnamese(str) {
   return String(str || '')
     .normalize('NFD')
@@ -441,6 +501,16 @@ function stripVietnamese(str) {
     .replace(/[^a-zA-Z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function buildDriveShortCode(name) {
+  const clean = stripVietnamese(name || '').toUpperCase();
+  const mMonth = clean.match(/THANG\s*(\d{1,2})|\bT(\d{1,2})\b/);
+  if (mMonth) return `T${mMonth[1] || mMonth[2]}`;
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (!words.length) return 'QUY';
+  if (words.length === 1) return words[0].slice(0, 10);
+  return words.map(w => (/^\d+$/.test(w) ? w : w[0])).join('').slice(0, 10);
 }
 
 function ensureMemberCodes(list) {
@@ -463,14 +533,153 @@ function ensureMemberCodes(list) {
   });
 }
 
-function formatTransferMemo(template, memberName, memberCode = '') {
-  const cleanName = stripVietnamese(memberName || '').toUpperCase();
+function getActiveDrive() {
+  if (!DB || !Array.isArray(DB.drives) || !DB.drives.length) return null;
+  return DB.drives.find(d => d.id === DB.activeDriveId) || DB.drives[0];
+}
+
+function getDriveById(driveId) {
+  if (!DB || !Array.isArray(DB.drives) || !DB.drives.length) return null;
+  if (!driveId) return getActiveDrive();
+  return DB.drives.find(d => d.id === driveId) || getActiveDrive();
+}
+
+function syncLegacyMirrorsFromActiveDrive() {
+  const active = getActiveDrive();
+  if (!active || !DB) return;
+  DB.activeDriveId = active.id;
+  DB.memberPaid = active.paid || {};
+  DB.memberPending = active.pending || {};
+  if (DB.settings) DB.settings.termFee = Number(active.amount) || 0;
+}
+
+function getMemberDriveStatus(memberId, driveId = null) {
+  const drive = getDriveById(driveId);
+  if (!drive) {
+    return { target: 0, paidAmount: 0, remaining: 0, isFullyPaid: false, isPartial: false, pendingTs: null, paidObj: null };
+  }
+  const target = Math.max(0, Math.round(Number(drive.amount) || 0));
+  const paidObj = drive.paid?.[memberId] || null;
+  let paidAmount = 0;
+  if (paidObj === true) paidAmount = target;
+  else if (paidObj && typeof paidObj === 'object') {
+    paidAmount = typeof paidObj.amount === 'number' ? paidObj.amount : (paidObj.paid ? target : 0);
+  }
+  const remaining = Math.max(0, target - paidAmount);
+  const isFullyPaid = target > 0 ? paidAmount >= target : !!paidObj;
+  const isPartial = !isFullyPaid && paidAmount > 0;
+  const pendingTs = !isFullyPaid ? (drive.pending?.[memberId] || null) : null;
+  return { target, paidAmount, remaining, isFullyPaid, isPartial, pendingTs, paidObj };
+}
+
+function driveStats(driveId = null) {
+  const drive = getDriveById(driveId);
+  const total = DB.members.length;
+  let paid = 0, partial = 0, pending = 0, collected = 0, expected = 0;
+  const target = drive ? Math.max(0, Math.round(Number(drive.amount) || 0)) : 0;
+  for (const m of DB.members) {
+    const st = getMemberDriveStatus(m.id, drive?.id);
+    expected += target;
+    collected += Math.min(target, st.paidAmount);
+    if (st.isFullyPaid) paid++;
+    else {
+      if (st.isPartial) partial++;
+      if (st.pendingTs) pending++;
+    }
+  }
+  return {
+    total,
+    paid,
+    partial,
+    pending,
+    unpaid: total - paid,
+    collected,
+    expected,
+    shortfall: Math.max(0, expected - collected)
+  };
+}
+
+// Đồng bộ tự động từ Ghi nhanh -> Thu quỹ khi có giao dịch Thu gắn với thành viên
+function recomputeAllDrivesFromTransactions() {
+  if (!DB || !Array.isArray(DB.drives)) return;
+  const defaultDriveId = DB.drives[0]?.id || 'drive_default';
+  const memberByName = new Map();
+  DB.members.forEach(m => {
+    memberByName.set(m.name.trim().toLowerCase(), m);
+  });
+
+  const txSumMap = {}; // `${driveId}__${memberId}` -> { amount, latestTs, latestDate, latestTxId }
+  for (const t of DB.transactions) {
+    if (t.status !== 'done' || t.type !== 'in') continue;
+    const rawName = (t.member || '').trim().toLowerCase();
+    if (!rawName) continue;
+    const mem = memberByName.get(rawName);
+    if (!mem) continue;
+    const targetDriveId = t.driveId || (t.category === 'quy' ? defaultDriveId : null);
+    if (!targetDriveId) continue;
+    const driveObj = DB.drives.find(d => d.id === targetDriveId);
+    if (!driveObj) continue;
+
+    const k = `${driveObj.id}__${mem.id}`;
+    if (!txSumMap[k]) {
+      txSumMap[k] = { amount: 0, latestTs: 0, latestDate: t.date, latestTxId: t.id };
+    }
+    txSumMap[k].amount += Math.max(0, Math.round(Number(t.amount) || 0));
+    if ((t.createdAt || 0) >= txSumMap[k].latestTs) {
+      txSumMap[k].latestTs = t.createdAt || Date.now();
+      txSumMap[k].latestDate = t.date || todayISO();
+      txSumMap[k].latestTxId = t.id;
+    }
+  }
+
+  for (const drive of DB.drives) {
+    if (!drive.paid) drive.paid = {};
+    if (!drive.pending) drive.pending = {};
+    const target = Math.max(0, Math.round(Number(drive.amount) || 0));
+
+    for (const mem of DB.members) {
+      const k = `${drive.id}__${mem.id}`;
+      const agg = txSumMap[k];
+      const existing = drive.paid[mem.id];
+
+      if (agg && agg.amount > 0) {
+        const isFull = target > 0 ? agg.amount >= target : true;
+        const ts = (existing && typeof existing === 'object' && existing.paidAt) ? existing.paidAt : (agg.latestTs || Date.now());
+        drive.paid[mem.id] = {
+          paid: isFull,
+          partial: !isFull,
+          amount: agg.amount,
+          date: agg.latestDate || todayISO(),
+          paidAt: ts,
+          paidAtStr: (existing && typeof existing === 'object' && existing.paidAtStr) ? existing.paidAtStr : formatExactDateTime(ts),
+          txId: agg.latestTxId,
+          syncedFromTx: true
+        };
+        if (isFull && drive.pending[mem.id]) {
+          delete drive.pending[mem.id];
+          delete remoteGuestReports[`${drive.id}__${mem.id}`];
+        }
+      } else if (existing && typeof existing === 'object' && existing.syncedFromTx) {
+        delete drive.paid[mem.id];
+      }
+    }
+  }
+  syncLegacyMirrorsFromActiveDrive();
+}
+
+function formatTransferMemo(template, memberName, memberCode = '', drive = null) {
+  const dObj = drive || getActiveDrive();
+  const cleanName = stripVietnamese(memberName || '');
   const cleanCode = stripVietnamese(memberCode || '').toUpperCase();
-  const raw = (template !== undefined && template !== null) ? String(template) : 'NOP QUY - {ten}';
+  const cleanDrive = stripVietnamese(dObj?.shortCode || buildDriveShortCode(dObj?.name || 'QUY')).toUpperCase();
+  const raw = (template !== undefined && template !== null && String(template).trim() !== '')
+    ? String(template)
+    : '{ten} dong quy {dot}';
   const replaced = raw
     .replace(/\{ten\}/gi, cleanName)
-    .replace(/\{(ma|stt)\}/gi, cleanCode);
-  return stripVietnamese(replaced).toUpperCase().slice(0, 50);
+    .replace(/\{(ma|stt)\}/gi, cleanCode)
+    .replace(/\{(dot|sukien)\}/gi, cleanDrive);
+  return stripVietnamese(replaced).slice(0, 50);
 }
 
 function buildVietQrUrl({ bankCode, accountNo, accountName, amount, customMemo }) {
@@ -486,158 +695,166 @@ function buildVietQrUrl({ bankCode, accountNo, accountName, amount, customMemo }
 function formatExactDateTime(ts = Date.now()) {
   const d = new Date(ts);
   const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} · ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+  return `${pad(d.getHours())}:${pad(d.getMinutes())} · ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
-function isMemberPaidToday(memberId) {
-  const val = DB?.memberPaid?.[memberId];
-  if (!val) return false;
-  if (val === true) return true;
-  if (typeof val === 'object') return true;
-  return false;
+function getMemberPaidLabel(memberId, driveId = null) {
+  const st = getMemberDriveStatus(memberId, driveId);
+  if (!st.paidObj) return '';
+  if (typeof st.paidObj === 'object' && st.paidObj.paidAtStr) return st.paidObj.paidAtStr;
+  return 'Đã đóng';
 }
 
-function getMemberPaidLabel(memberId) {
-  const val = DB?.memberPaid?.[memberId];
-  if (!val) return '';
-  if (typeof val === 'object' && val.paidAtStr) return val.paidAtStr;
-  return 'Đã đóng hôm nay';
-}
-
-function checkDailyMemberReset(shouldSave = true) {
-  if (!DB || !DB.settings) return false;
-  const today = todayISO();
-  if (!DB.lastMemberResetDate) {
-    DB.lastMemberResetDate = today;
+function reportMemberTransfer(memberId, driveId = null, options = {}) {
+  const drive = getDriveById(driveId);
+  if (!DB || !memberId || !drive) return false;
+  const m = DB.members.find(x => x.id === memberId);
+  if (!m) return false;
+  const st = getMemberDriveStatus(memberId, drive.id);
+  if (st.isFullyPaid) {
+    if (!options.silentToast) toast(`${m.name} đã được xác nhận đóng đủ đợt này rồi`, 'var(--income)');
     return false;
   }
-  if (DB.settings.dailyResetMembers === false) return false;
-  if (DB.lastMemberResetDate !== today) {
-    DB.lastMemberResetDate = today;
-    DB.memberPaid = {};
-    if (shouldSave) saveDB();
-    return true;
+  const now = Date.now();
+  if (!drive.pending) drive.pending = {};
+  const alreadyReported = !!drive.pending[memberId];
+  if (!alreadyReported || options.forceUpdate) {
+    drive.pending[memberId] = now;
   }
-  return false;
-}
-
-function reportMemberTransfer(memberId) {
-  if (!DB || !memberId) return;
-  const m = DB.members.find(x => x.id === memberId);
-  if (!m) return;
-  if (isMemberPaidToday(memberId)) {
-    toast(`${m.name} đã được xác nhận đóng quỹ rồi`, 'var(--income)');
-    return;
-  }
-  DB.memberPending = DB.memberPending && typeof DB.memberPending === 'object' ? DB.memberPending : {};
-  DB.memberPending[memberId] = Date.now();
-  DB._updatedAt = Date.now();
+  syncLegacyMirrorsFromActiveDrive();
+  DB._updatedAt = now;
   if (currentUser && !isPublicGuestMode) {
     safeStorage.setItem(userDBKey(currentUser.username), JSON.stringify(DB));
   }
-  pushCloudDB(true);
-  toast(`Đã gửi báo chuyển khoản cho ${m.name} — chờ thủ quỹ duyệt`, 'var(--income)');
-  if ($('#sheetOverlay')?.classList.contains('open')) renderMembersSheet();
+  pushGuestTransferReport(drive.id, memberId, drive.pending[memberId]);
+  if (!isGuestLocked()) pushCloudDB();
+
+  if (!options.silentToast) {
+    toast(`Đã tự động điền "Tôi đã CK" cho ${m.name} — chờ thủ quỹ duyệt`, 'var(--income)');
+  }
+  if ($('#sheetOverlay')?.classList.contains('open') && $('#memberRowsContainer')) {
+    renderMembersSheet();
+  }
+  if (currentView === 'home') render();
+  return true;
+}
+
+function cancelMemberTransferReport(memberId, driveId = null) {
+  const drive = getDriveById(driveId);
+  if (!DB || !memberId || !drive) return;
+  if (drive.pending) delete drive.pending[memberId];
+  syncLegacyMirrorsFromActiveDrive();
+  pushGuestTransferReport(drive.id, memberId, null);
+  if (!isGuestLocked()) pushCloudDB();
+  toast('Đã huỷ trạng thái báo chuyển khoản');
+  if ($('#sheetOverlay')?.classList.contains('open') && $('#memberRowsContainer')) {
+    renderMembersSheet();
+  }
   if (currentView === 'home') render();
 }
 
 function setMemberPaidStatus(memberId, shouldPay, options = {}) {
+  const drive = getDriveById(options.driveId);
+  if (!drive) return;
   const m = DB.members.find(x => x.id === memberId);
   if (!m) return;
-  DB.memberPending = DB.memberPending && typeof DB.memberPending === 'object' ? DB.memberPending : {};
+  if (!drive.paid) drive.paid = {};
+  if (!drive.pending) drive.pending = {};
   DB.paymentLogs = Array.isArray(DB.paymentLogs) ? DB.paymentLogs : [];
+
   const today = todayISO();
-  const autoTxId = `fund_${today}_${memberId}`;
+  const st = getMemberDriveStatus(memberId, drive.id);
+  const wasPending = !!drive.pending[memberId];
 
   if (shouldPay) {
-    const prevLogs = DB.paymentLogs.filter(x => x.memberId === memberId && x.date !== today);
-    let shouldAddTx = true;
-    if (prevLogs.length > 0 && !options.skipConfirm) {
-      const lastLog = prevLogs[0];
-      const addMoney = confirm(
-        `${m.name} đã từng đóng quỹ (${fmtMoney(lastLog.amount || 0)} lúc ${lastLog.paidAtStr || lastLog.date}).\n\n` +
-        `• Bấm OK: Đánh dấu đã đóng hôm nay VÀ cộng thêm ${fmtMoney(DB.settings?.termFee || 0)} vào Tài khoản.\n` +
-        `• Bấm Hủy: Chỉ đánh dấu đã đóng hôm nay (không cộng trùng tiền vào Tài khoản).`
-      );
-      shouldAddTx = addMoney;
-    }
-
     const now = Date.now();
     const paidAtStr = formatExactDateTime(now);
-    const fee = shouldAddTx ? Math.max(0, Math.round(Number(DB.settings?.termFee) || 0)) : 0;
-    DB.memberPaid[memberId] = {
+    const collectAmt = st.remaining > 0 ? st.remaining : Math.max(0, Math.round(Number(drive.amount) || 0));
+    const totalNow = st.paidAmount + collectAmt;
+    const autoTxId = `drive_${drive.id}_${memberId}_${now}`;
+
+    drive.paid[memberId] = {
       paid: true,
+      partial: false,
+      amount: totalNow,
       date: today,
       paidAt: now,
       paidAtStr,
-      amount: fee
+      txId: autoTxId,
+      syncedFromTx: true
     };
-    delete DB.memberPending[memberId];
+    delete drive.pending[memberId];
+    pushGuestTransferReport(drive.id, memberId, null);
 
-    const logId = `log_${today}_${memberId}`;
-    const logIdx = DB.paymentLogs.findIndex(x => x.id === logId);
-    const logEntry = {
-      id: logId,
+    DB.paymentLogs.unshift({
+      id: `log_${now}_${memberId}`,
+      driveId: drive.id,
+      driveName: drive.name,
       memberId,
       memberCode: m.code || '',
       memberName: m.name,
-      amount: fee,
+      amount: collectAmt,
       date: today,
       paidAt: now,
       paidAtStr
-    };
-    if (logIdx >= 0) DB.paymentLogs[logIdx] = logEntry;
-    else DB.paymentLogs.unshift(logEntry);
+    });
 
-    if (fee > 0) {
-      const existingIdx = DB.transactions.findIndex(t => t.id === autoTxId);
-      const txObj = {
+    if (collectAmt > 0) {
+      const walletUsed = options.wallet || (wasPending ? 'bank' : 'cash');
+      DB.transactions.push({
         id: autoTxId,
         type: 'in',
-        amount: fee,
+        amount: collectAmt,
         category: 'quy',
         categoryName: 'Quỹ lớp',
-        wallet: 'bank',
-        account: 'bank',
+        driveId: drive.id,
+        wallet: walletUsed,
+        account: walletUsed,
         date: today,
         member: m.name,
-        note: `Thu quỹ lớp · ${m.name} (${paidAtStr})`,
+        note: `Thu ${drive.name} · ${m.name}`,
         receipt: null,
         status: 'done',
         createdAt: now
-      };
-      if (existingIdx >= 0) {
-        DB.transactions[existingIdx] = { ...DB.transactions[existingIdx], ...txObj, createdAt: DB.transactions[existingIdx].createdAt };
-      } else {
-        DB.transactions.push(txObj);
-      }
-      if (!options.silent) {
-        toast(`✓ ${m.name} đã đóng lúc ${paidAtStr}`, 'var(--income)');
-      }
-    } else if (!options.silent) {
-      toast(`✓ Đã đánh dấu ${m.name} đóng lúc ${paidAtStr} (không cộng trùng tiền)`, 'var(--income)');
+      });
+    }
+    syncLegacyMirrorsFromActiveDrive();
+    if (!options.silent) {
+      toast(`✓ Đã duyệt ${m.name} (${fmtMoney(collectAmt)}) vào ví ${wasPending ? 'Chuyển khoản' : 'Tiền mặt'}`, 'var(--income)');
     }
   } else {
-    delete DB.memberPaid[memberId];
-    const logId = `log_${today}_${memberId}`;
-    DB.paymentLogs = DB.paymentLogs.filter(x => x.id !== logId);
+    delete drive.paid[memberId];
+    DB.paymentLogs = DB.paymentLogs.filter(x => !(x.memberId === memberId && (x.driveId || 'drive_default') === drive.id));
     const beforeLen = DB.transactions.length;
-    DB.transactions = DB.transactions.filter(t => t.id !== autoTxId && t.id !== `fund_${memberId}`);
+    DB.transactions = DB.transactions.filter(t => {
+      const sameMember = (t.member || '').trim().toLowerCase() === m.name.trim().toLowerCase();
+      const sameDrive = (t.driveId || (t.category === 'quy' ? (DB.drives[0]?.id || 'drive_default') : null)) === drive.id;
+      return !(sameMember && sameDrive && t.type === 'in');
+    });
+    syncLegacyMirrorsFromActiveDrive();
     if (!options.silent) {
       toast(DB.transactions.length < beforeLen
-        ? `Đã hoàn tác ${m.name} & trừ khoản thu khỏi Tài khoản`
+        ? `Đã hoàn tác ${m.name} & trừ khoản thu khỏi Sổ quỹ`
         : `Đã chuyển ${m.name} về Chưa đóng`);
     }
   }
 }
 
-function openMemberQr(memberName, amount, memberId = null, memberCode = '') {
+/* ============================================================
+   3. VIETQR ĐỘNG + TỰ ĐỘNG ĐIỀN "TÔI ĐÃ CK" KHI KHÁCH QUÉT QR
+============================================================ */
+function openMemberQr(memberName, amount, memberId = null, memberCode = '', driveId = null) {
+  const drive = getDriveById(driveId);
   const bankCfg = DB?.settings?.bank || {};
-  const amtNum = Math.max(0, Math.round(Number(amount ?? DB?.settings?.termFee ?? 0)));
+  const st = memberId ? getMemberDriveStatus(memberId, drive?.id) : null;
+  const fallbackAmt = st ? (st.remaining > 0 ? st.remaining : st.target) : (drive?.amount ?? DB?.settings?.termFee ?? 0);
+  const amtNum = Math.max(0, Math.round(Number(amount !== undefined && amount !== null ? amount : fallbackAmt)));
+
   const initialMemo = formatTransferMemo(
-    bankCfg.transferNote !== undefined ? bankCfg.transferNote : 'NOP QUY - {ten}',
+    bankCfg.transferNote !== undefined ? bankCfg.transferNote : '{ten} dong quy {dot}',
     memberName,
-    memberCode
+    memberCode,
+    drive
   );
   const url = buildVietQrUrl({
     bankCode: bankCfg.bankCode || 'BIDV',
@@ -647,45 +864,62 @@ function openMemberQr(memberName, amount, memberId = null, memberCode = '') {
     customMemo: initialMemo
   });
 
+  activeQrContext = { memberId, driveId: drive?.id || null, memberName };
+
+  // Nếu là Khách (?view=1) mở mã QR để quét -> tự động điền "Tôi đã CK" ngay lập tức!
+  let autoReportedNow = false;
+  if (isGuestLocked() && memberId && drive && st && !st.isFullyPaid) {
+    autoReportedNow = reportMemberTransfer(memberId, drive.id, { silentToast: true });
+  }
+
   const modal = $('#qrModal');
   const box = $('#qrBox');
-  const isPaid = memberId ? !!DB?.memberPaid?.[memberId] : false;
-  const isPending = memberId ? !!DB?.memberPending?.[memberId] : false;
+  const updatedSt = memberId ? getMemberDriveStatus(memberId, drive?.id) : null;
+  const isPaid = updatedSt ? updatedSt.isFullyPaid : false;
 
-  const reportBtnHtml = (memberId && !isPaid) ? `
-    <button id="qrReportPaidBtn" class="press w-full rounded-xl border border-[var(--income)] bg-[var(--accent-soft)] py-2.5 text-[13px] font-semibold text-[var(--income)]">
-      ${isPending ? '⏳ Đã báo chuyển khoản (Gửi lại)' : '💸 Tôi đã chuyển khoản'}
-    </button>` : '';
+  const autoStatusBanner = (isGuestLocked() && memberId && !isPaid) ? `
+    <div id="qrAutoStatusBox" class="rounded-xl border border-[var(--income)] bg-[var(--accent-soft)] px-3 py-2 text-left text-[12px]">
+      <p class="font-semibold text-[var(--income)]">✅ ${autoReportedNow ? 'Đã tự động điền "Tôi đã CK" khi mở mã QR!' : 'Đã ghi nhận trạng thái "Tôi đã CK"'}</p>
+      <p class="mt-0.5 text-[var(--text-2)]">Sau khi bạn quét mã chuyển khoản xong, Thủ quỹ sẽ kiểm tra biến động số dư và bấm duyệt xác nhận.</p>
+      <button id="qrCancelReportBtn" type="button" class="mt-1.5 text-[11px] font-medium underline text-[var(--text-3)]">Chưa chuyển? Huỷ báo đã CK</button>
+    </div>` : '';
 
   if (!url) {
     box.innerHTML = `
       <h3 class="text-[17px] font-bold">Chưa cấu hình tài khoản nhận quỹ</h3>
       <p class="text-[13px] text-[var(--text-2)]">Vào mục <b>Cài đặt → Tài khoản nhận quỹ (VietQR)</b> để nhập ngân hàng (BIDV, VCB, MB...) và số tài khoản.</p>
-      ${reportBtnHtml}
+      ${autoStatusBanner}
       <button id="qrCloseBtn" class="press w-full rounded-xl bg-[var(--accent)] py-2.5 text-[14px] font-semibold text-[var(--on-accent)]">Đóng</button>
     `;
   } else {
     box.innerHTML = `
-      <h3 class="text-[17px] font-bold">Mã QR · ${escapeHtml(memberName)}</h3>
+      <div>
+        <span class="inline-block rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--accent)]">${escapeHtml(drive?.name || 'Quỹ lớp')}</span>
+        <h3 class="mt-1 text-[17px] font-bold">VietQR · ${escapeHtml(memberName)}</h3>
+      </div>
       <p class="text-[13px] text-[var(--text-2)]">
         ${escapeHtml((bankCfg.bankCode || 'BIDV').toUpperCase())} · <span class="font-mono font-semibold">${escapeHtml(bankCfg.accountNo)}</span>
       </p>
-      <p class="text-[16px] font-bold text-[var(--income)] tabular-nums">${fmtMoney(amtNum)}</p>
-      <img id="qrModalImg" src="${url}" alt="VietQR" class="mx-auto h-64 w-64 rounded-xl border border-[var(--border)] object-contain bg-white" />
-      <div class="text-left">
-        <label class="text-[11px] text-[var(--text-3)]">Nội dung chuyển khoản (thủ quỹ có thể sửa hoặc xoá trống)</label>
-        <input id="qrCustomMemoInput" type="text" maxlength="50" value="${escapeHtml(initialMemo)}"
-          placeholder="Để trống nếu muốn người nộp tự nhập"
-          class="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[13px] uppercase outline-none" />
+      <div>
+        <p class="text-[11px] text-[var(--text-3)]">${updatedSt?.isPartial ? `Đã đóng ${fmtMoney(updatedSt.paidAmount)} · Số tiền còn thiếu:` : 'Số tiền cần chuyển:'}</p>
+        <p class="text-[20px] font-bold text-[var(--income)] tabular-nums">${fmtMoney(amtNum)}</p>
       </div>
-      ${reportBtnHtml}
+      <img id="qrModalImg" src="${url}" alt="VietQR" class="mx-auto h-60 w-60 rounded-xl border border-[var(--border)] object-contain bg-white" />
+      <div class="text-left">
+        <label class="text-[11px] text-[var(--text-3)]">Nội dung chuyển khoản tự động (không dấu)</label>
+        <input id="qrCustomMemoInput" type="text" maxlength="50" value="${escapeHtml(initialMemo)}"
+          ${isGuestLocked() ? 'readonly' : ''}
+          class="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-2 text-[13px] font-mono outline-none" />
+      </div>
+      ${autoStatusBanner}
       <button id="qrCloseBtn" class="press w-full rounded-xl bg-[var(--accent)] py-2.5 text-[14px] font-semibold text-[var(--on-accent)]">Đóng</button>
     `;
+
     const memoInp = $('#qrCustomMemoInput');
     const qrImg = $('#qrModalImg');
-    if (memoInp && qrImg) {
+    if (memoInp && qrImg && !isGuestLocked()) {
       memoInp.oninput = () => {
-        const cleanMemo = stripVietnamese(memoInp.value).toUpperCase().slice(0, 50);
+        const cleanMemo = stripVietnamese(memoInp.value).slice(0, 50);
         qrImg.src = buildVietQrUrl({
           bankCode: bankCfg.bankCode || 'BIDV',
           accountNo: bankCfg.accountNo || '',
@@ -697,19 +931,44 @@ function openMemberQr(memberName, amount, memberId = null, memberCode = '') {
     }
   }
   modal.hidden = false;
-  if ($('#qrReportPaidBtn') && memberId) {
-    $('#qrReportPaidBtn').onclick = () => {
-      reportMemberTransfer(memberId);
+
+  if ($('#qrCancelReportBtn') && memberId && drive) {
+    $('#qrCancelReportBtn').onclick = () => {
+      cancelMemberTransferReport(memberId, drive.id);
       modal.hidden = true;
+      activeQrContext = null;
     };
   }
-  $('#qrCloseBtn').onclick = () => { modal.hidden = true; };
+  $('#qrCloseBtn').onclick = () => {
+    modal.hidden = true;
+    activeQrContext = null;
+  };
 }
+
 const qrBackdropEl = $('#qrBackdrop');
-if (qrBackdropEl) qrBackdropEl.onclick = () => { $('#qrModal').hidden = true; };
+if (qrBackdropEl) qrBackdropEl.onclick = () => { $('#qrModal').hidden = true; activeQrContext = null; };
+
+function openReceiptModal(src, caption = 'Ảnh hóa đơn / minh chứng') {
+  if (!src) return;
+  const modal = $('#receiptModal');
+  const box = $('#receiptBox');
+  box.innerHTML = `
+    <div class="flex items-center justify-between">
+      <h3 class="text-[15px] font-semibold truncate">${escapeHtml(caption)}</h3>
+      <button id="receiptCloseTop" class="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-2)] hover:bg-[var(--surface-2)]">✕</button>
+    </div>
+    <img src="${src}" alt="Hóa đơn" class="mx-auto max-h-[70dvh] w-auto rounded-xl border border-[var(--border)] object-contain bg-black/5" />
+    <button id="receiptCloseBtn" class="press w-full rounded-xl bg-[var(--accent)] py-2.5 text-[14px] font-semibold text-[var(--on-accent)]">Đóng</button>
+  `;
+  modal.hidden = false;
+  $('#receiptCloseTop').onclick = () => { modal.hidden = true; };
+  $('#receiptCloseBtn').onclick = () => { modal.hidden = true; };
+}
+const receiptBackdropEl = $('#receiptBackdrop');
+if (receiptBackdropEl) receiptBackdropEl.onclick = () => { $('#receiptModal').hidden = true; };
 
 /* ============================================================
-   2. DATE / IMAGE / SAFE STORAGE / TOAST
+   4. DATE / NÉN ẢNH HÓA ĐƠN < 100KB / SAFE STORAGE / TOAST
 ============================================================ */
 const VI_DAYS = ['CN','Thứ Hai','Thứ Ba','Thứ Tư','Thứ Năm','Thứ Sáu','Thứ Bảy'];
 
@@ -728,21 +987,53 @@ function isThisMonth(iso) {
   return String(iso || '').startsWith(todayISO().slice(0, 7));
 }
 
-function compressImage(file, maxSize, callback) {
+function estimateDataUrlBytes(dataUrl) {
+  if (!dataUrl) return 0;
+  const commaIdx = dataUrl.indexOf(',');
+  const b64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+  return Math.round((b64.length * 3) / 4);
+}
+
+// Nén ảnh hóa đơn qua HTML5 Canvas đảm bảo dung lượng < 100KB
+function compressReceiptUnder100KB(file, callback) {
+  const MAX_BYTES = 96 * 1024;
   const reader = new FileReader();
   reader.onload = (e) => {
     const img = new Image();
     img.onload = () => {
-      let { width, height } = img;
-      if (width > maxSize || height > maxSize) {
-        if (width > height) { height = (height / width) * maxSize; width = maxSize; }
-        else { width = (width / height) * maxSize; height = maxSize; }
+      const dimensions = [900, 720, 560, 440];
+      const qualities = [0.75, 0.6, 0.48, 0.36, 0.28];
+      let bestDataUrl = '';
+      let bestSize = Infinity;
+
+      for (const maxDim of dimensions) {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) { height = Math.round((height / width) * maxDim); width = maxDim; }
+          else { width = Math.round((width / height) * maxDim); height = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        for (const q of qualities) {
+          const dataUrl = canvas.toDataURL('image/jpeg', q);
+          const bytes = estimateDataUrlBytes(dataUrl);
+          if (bytes < bestSize) {
+            bestSize = bytes;
+            bestDataUrl = dataUrl;
+          }
+          if (bytes <= MAX_BYTES) {
+            callback(dataUrl, Math.max(1, Math.round(bytes / 1024)));
+            return;
+          }
+        }
       }
-      const canvas = document.createElement('canvas');
-      canvas.width = width; canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      callback(canvas.toDataURL('image/jpeg', 0.7));
+      callback(bestDataUrl, Math.max(1, Math.round(bestSize / 1024)));
     };
     img.src = e.target.result;
   };
@@ -767,7 +1058,7 @@ const safeStorage = (() => {
           window.localStorage.setItem(k, v);
         } catch(e){
           if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
-            alert('Bộ nhớ trình duyệt đã đầy! Không thể lưu thêm dữ liệu. Xoá bớt ảnh hoá đơn cũ hoặc dọn dẹp bộ nhớ.');
+            alert('Bộ nhớ trình duyệt đã đầy! Hãy xuất sao lưu JSON hoặc xoá bớt ảnh hoá đơn cũ.');
           }
         }
       },
@@ -790,13 +1081,13 @@ function toast(msg, color) {
     transition:opacity .2s;background:${color || 'var(--text)'};color:var(--bg);max-width:92vw;text-align:center;`;
   el.style.opacity = '1';
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 2600);
+  toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 2700);
 }
 
 function copyText(text) {
   try {
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(() => toast('Đã copy — dán vào nhóm lớp nhé')).catch(() => fallbackCopy(text));
+      navigator.clipboard.writeText(text).then(() => toast('Đã copy — dán thẳng vào nhóm Zalo/Messenger nhé')).catch(() => fallbackCopy(text));
     } else { fallbackCopy(text); }
   } catch (e) { fallbackCopy(text); }
 }
@@ -809,14 +1100,14 @@ function fallbackCopy(text) {
     ta.focus(); ta.select();
     const ok = document.execCommand('copy');
     document.body.removeChild(ta);
-    toast(ok ? 'Đã copy — dán vào nhóm lớp nhé' : 'Không copy được — bạn copy tay giúp nhé');
+    toast(ok ? 'Đã copy — dán thẳng vào nhóm Zalo/Messenger nhé' : 'Không copy được — bạn copy tay giúp nhé');
   } catch (e) {
     toast('Không copy được — bạn copy tay giúp nhé');
   }
 }
 
 /* ============================================================
-   3. AUTH
+   5. AUTH
 ============================================================ */
 const AUTH_USERS_KEY = 'siquy-users';
 const SESSION_KEY    = 'siquy-session';
@@ -872,13 +1163,26 @@ function userDBKey(username) { return DB_KEY_PREFIX + username.toLowerCase(); }
 let currentUser = null;
 
 /* ============================================================
-   4. DB + BACKUP / RESTORE JSON (CỤM 4)
+   6. DB + DRIVES MIGRATION + BACKUP / RESTORE JSON
 ============================================================ */
 function emptyDB() {
+  const defaultDriveId = 'drive_default';
   return {
     transactions: [],
     cashChecks: [],
     members: [],
+    drives: [
+      {
+        id: defaultDriveId,
+        name: 'Quỹ lớp định kỳ',
+        shortCode: 'QUYLOP',
+        amount: 50000,
+        createdAt: Date.now(),
+        paid: {},
+        pending: {}
+      }
+    ],
+    activeDriveId: defaultDriveId,
     memberPaid: {},
     memberPending: {},
     paymentLogs: [],
@@ -888,10 +1192,9 @@ function emptyDB() {
       notifDaily: true,
       notifTime: '21:00',
       termFee: 50000,
-      dailyResetMembers: true,
       hideBalance: false,
       adminPin: '1234',
-      bank: { bankCode: 'BIDV', accountNo: '', accountName: '', transferNote: 'NOP QUY - {ten}' }
+      bank: { bankCode: 'BIDV', accountNo: '', accountName: '', transferNote: '{ten} dong quy {dot}' }
     },
     _updatedAt: Date.now()
   };
@@ -915,12 +1218,43 @@ function normalizeDB(parsed) {
     : [];
   out.cashChecks = Array.isArray(out.cashChecks) ? out.cashChecks : [];
   out.members = ensureMemberCodes(Array.isArray(out.members) ? out.members : []);
-  out.memberPaid = out.memberPaid && typeof out.memberPaid === 'object' ? out.memberPaid : {};
-  out.memberPending = out.memberPending && typeof out.memberPending === 'object' ? out.memberPending : {};
   out.paymentLogs = Array.isArray(out.paymentLogs) ? out.paymentLogs : [];
-  out.lastMemberResetDate = out.lastMemberResetDate || todayISO();
   out.settings = Object.assign(base.settings, (parsed && parsed.settings) || {});
   out.settings.bank = Object.assign(base.settings.bank, ((parsed && parsed.settings && parsed.settings.bank) || {}));
+
+  if (!Array.isArray(parsed?.drives) || parsed.drives.length === 0) {
+    const legacyFee = Math.max(0, Math.round(Number(out.settings.termFee) || 50000));
+    out.drives = [
+      {
+        id: 'drive_default',
+        name: 'Quỹ lớp định kỳ',
+        shortCode: 'QUYLOP',
+        amount: legacyFee,
+        createdAt: Date.now(),
+        paid: (parsed?.memberPaid && typeof parsed.memberPaid === 'object') ? { ...parsed.memberPaid } : {},
+        pending: (parsed?.memberPending && typeof parsed.memberPending === 'object') ? { ...parsed.memberPending } : {}
+      }
+    ];
+    out.activeDriveId = 'drive_default';
+  } else {
+    out.drives = parsed.drives.map((d, idx) => ({
+      id: d.id || (idx === 0 ? 'drive_default' : uid()),
+      name: d.name || `Đợt thu ${idx + 1}`,
+      shortCode: d.shortCode || buildDriveShortCode(d.name || `DOT${idx + 1}`),
+      amount: Math.max(0, Math.round(Number(d.amount) || 0)),
+      createdAt: d.createdAt || Date.now(),
+      paid: (d.paid && typeof d.paid === 'object') ? { ...d.paid } : {},
+      pending: (d.pending && typeof d.pending === 'object') ? { ...d.pending } : {}
+    }));
+    out.activeDriveId = out.drives.some(d => d.id === parsed.activeDriveId)
+      ? parsed.activeDriveId
+      : out.drives[0].id;
+  }
+
+  const prevDB = DB;
+  DB = out;
+  recomputeAllDrivesFromTransactions();
+  if (prevDB) DB = prevDB;
   return out;
 }
 
@@ -935,6 +1269,7 @@ function loadUserDB(username) {
 
 function saveDB() {
   if (!DB) return;
+  recomputeAllDrivesFromTransactions();
   if (!isApplyingRemoteSnapshot) {
     DB._updatedAt = Date.now();
   }
@@ -946,15 +1281,15 @@ function saveDB() {
   }
 }
 
-// 1. Xuất toàn bộ dữ liệu ra file .json
 function exportJSONBackup(appState = DB) {
   if (!appState) return;
   const backupPayload = {
     app: 'SoQuyLop',
-    version: '1.0',
+    version: '2.1',
     exportedAt: new Date().toISOString(),
     data: {
       ...appState,
+      drives: appState.drives || [],
       members: appState.members || [],
       transactions: appState.transactions || [],
       settings: appState.settings || {}
@@ -974,7 +1309,6 @@ function exportJSONBackup(appState = DB) {
   toast('Đã xuất file sao lưu (.json)', 'var(--income)');
 }
 
-// 2. Đọc và kiểm tra file .json trước khi khôi phục
 function handleRestoreJSON(fileInputEvent, onConfirmRestore) {
   const file = fileInputEvent?.target?.files?.[0];
   if (!file) return;
@@ -993,10 +1327,12 @@ function handleRestoreJSON(fileInputEvent, onConfirmRestore) {
         return;
       }
       const membersArr = Array.isArray(parsed.data.members) ? parsed.data.members : [];
+      const drivesArr = Array.isArray(parsed.data.drives) ? parsed.data.drives : [];
       const exportedDateStr = parsed.exportedAt
         ? new Date(parsed.exportedAt).toLocaleString('vi-VN')
         : 'không rõ thời gian';
       const msg = `Khôi phục bản sao lưu ngày ${exportedDateStr}?\n`
+                + `- Đợt thu: ${drivesArr.length || 1}\n`
                 + `- Thành viên: ${membersArr.length}\n`
                 + `- Giao dịch: ${parsed.data.transactions.length}\n`
                 + `(Dữ liệu hiện tại sẽ được thay thế)`;
@@ -1022,7 +1358,7 @@ function handleRestoreJSON(fileInputEvent, onConfirmRestore) {
 }
 
 /* ============================================================
-   5. CATEGORIES & COMPUTATIONS (TÁCH VÍ TIỀN MẶT & CHUYỂN KHOẢN)
+   7. CATEGORIES & COMPUTATIONS
 ============================================================ */
 const CATEGORIES = {
   in: [
@@ -1056,7 +1392,6 @@ function catIcon(catId) {
 }
 const DENOMS = [500000, 200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000];
 
-// Hàm tạo phiếu điều chỉnh khi kiểm đếm bị lệch (Cụm 1)
 function createReconcileTransaction(wallet, bookBalance, actualBalance, reason) {
   const diff = actualBalance - bookBalance;
   if (diff === 0) return null;
@@ -1064,10 +1399,10 @@ function createReconcileTransaction(wallet, bookBalance, actualBalance, reason) 
 
   return {
     id: 'adj_' + Date.now() + '_' + wallet,
-    type: diff > 0 ? 'in' : 'out',      // Thừa tiền -> ghi tăng; Thiếu tiền -> ghi giảm
-    isAdjustment: true,                 // Đánh dấu phiếu điều chỉnh kiểm kê
-    wallet: wallet,                     // 'cash' hoặc 'bank'
-    account: wallet,                    // Giữ tương thích hiển thị sổ quỹ
+    type: diff > 0 ? 'in' : 'out',
+    isAdjustment: true,
+    wallet: wallet,
+    account: wallet,
     category: 'adjust',
     categoryName: 'Điều chỉnh kiểm kê',
     amount: Math.abs(diff),
@@ -1129,15 +1464,9 @@ function lastMonthsSeries(n = 6) {
 function getTodayCheck() { return DB.cashChecks.find(c => c.date === todayISO()); }
 function getDrafts() { return DB.transactions.filter(t => t.status === 'draft').sort((a, b) => b.createdAt - a.createdAt); }
 function getRecent(n = 5) { return DB.transactions.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, n); }
-function membersStats() {
-  const total = DB.members.length;
-  const paid = DB.members.filter(m => DB.memberPaid[m.id]).length;
-  const pending = DB.members.filter(m => !DB.memberPaid[m.id] && DB.memberPending?.[m.id]).length;
-  return { total, paid, pending, unpaid: total - paid };
-}
 
 /* ============================================================
-   6. APPBAR / NAV / THEME
+   8. APPBAR / NAV / THEME
 ============================================================ */
 const VIEW_TITLES = { home: 'Sổ Quỹ Lớp', ledger: 'Sổ quỹ', check: 'Kiểm đếm', reports: 'Báo cáo', settings: 'Cài đặt' };
 const THEMES = [
@@ -1214,7 +1543,7 @@ function renderNav() {
     $('#bottomnav').innerHTML = `
       <div class="flex h-16 items-center justify-between px-4 gap-3">
         <button data-act="open-members" class="press flex-1 rounded-xl bg-[var(--accent)] py-2.5 text-[13px] font-semibold text-[var(--on-accent)]">
-          👥 Xem danh sách · QR · Báo đã CK
+          👥 Chọn tên · Quét QR · Tự báo đã CK
         </button>
         <button data-act="unlock-pin" class="press rounded-xl border border-[var(--border)] px-3 py-2.5 text-[12px] font-medium text-[var(--text-2)]">
           🔒 PIN thủ quỹ
@@ -1241,7 +1570,7 @@ function renderNav() {
 }
 
 /* ============================================================
-   7. ROUTER
+   9. ROUTER
 ============================================================ */
 function navigate(view) {
   if (isGuestLocked() && view !== 'home') {
@@ -1264,14 +1593,15 @@ function render() {
 }
 
 /* ============================================================
-   8. VIEW: HOME
+   10. VIEW: HOME
 ============================================================ */
 function renderHome() {
   const bal = balance();
   const m = monthStats();
   const drafts = getDrafts();
   const recent = getRecent(5);
-  const mem = membersStats();
+  const activeDrive = getActiveDrive();
+  const mem = driveStats(activeDrive?.id);
   const todayCheck = getTodayCheck();
 
   const disp = (v) => balanceHidden ? '•••••••đ' : fmtMoney(v);
@@ -1292,12 +1622,12 @@ function renderHome() {
   }
   if (mem.pending > 0) {
     reminders.push(`<li><button data-act="open-members" class="press flex w-full items-center gap-3 py-2.5 text-left text-[15px]">
-      <span class="text-lg">💸</span><span class="flex-1 font-medium text-[var(--expense)]">${mem.pending} bạn báo đã chuyển khoản (chờ duyệt)</span>
+      <span class="text-lg">💸</span><span class="flex-1 font-medium text-[var(--expense)]">${mem.pending} bạn đã báo CK (${escapeHtml(activeDrive?.name || 'Quỹ lớp')}) — chờ duyệt</span>
       <span class="text-[var(--text-3)]">›</span></button></li>`);
   }
   if (mem.unpaid > 0) {
     reminders.push(`<li><button data-act="open-members" class="press flex w-full items-center gap-3 py-2.5 text-left text-[15px]">
-      <span class="text-lg">⚠️</span><span class="flex-1 text-[var(--warn)]">${mem.unpaid} bạn chưa đóng quỹ</span>
+      <span class="text-lg">⚠️</span><span class="flex-1 text-[var(--warn)]">${mem.unpaid} bạn chưa đóng ${escapeHtml(activeDrive?.name || 'quỹ')}</span>
       <span class="text-[var(--text-3)]">›</span></button></li>`);
   }
 
@@ -1340,8 +1670,11 @@ function renderHome() {
         </button>
         <button data-act="open-members" class="press relative flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-left">
           <span class="text-[22px] leading-none">👥</span>
-          <span class="text-[15px] font-medium">Thu quỹ</span>
-          ${mem.unpaid > 0 ? `<span class="absolute right-3 top-3 h-2 w-2 rounded-full bg-[var(--warn)]"></span>` : ''}
+          <div class="min-w-0 flex-1">
+            <span class="block text-[15px] font-medium">Thu quỹ</span>
+            <span class="block truncate text-[11px] text-[var(--text-3)]">${escapeHtml(activeDrive?.name || 'Quỹ lớp')} (${mem.paid}/${mem.total})</span>
+          </div>
+          ${(mem.unpaid > 0 || mem.pending > 0) ? `<span class="absolute right-3 top-3 h-2 w-2 rounded-full bg-[var(--warn)]"></span>` : ''}
         </button>
         <button data-act="go-reports" class="press flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3.5 text-left">
           <span class="text-[22px] leading-none">📊</span>
@@ -1405,32 +1738,39 @@ function txItemHTML(t) {
   const icon = isAdj ? '⚖️' : catIcon(t.category);
   const sign = t.type === 'in' ? '+' : '−';
   const color = t.type === 'in' ? 'var(--income)' : 'var(--expense)';
+  const driveObj = t.driveId ? DB.drives.find(d => d.id === t.driveId) : null;
   return `<li class="${isDraft ? 'bg-[var(--draft-bg)]' : ''}">
-    <button data-act="edit-tx" data-id="${t.id}" class="press flex w-full items-center gap-3 px-4 py-3 text-left">
-      <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-base">${icon}</span>
-      <span class="min-w-0 flex-1">
-        <span class="flex items-center gap-2">
-          <span class="truncate text-[15px] font-medium">${escapeHtml(t.note || t.categoryName)}</span>
-          ${isDraft ? `<span class="rounded-md bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--accent)]">Nháp</span>` : ''}
-          ${isAdj ? `<span class="rounded-md bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--warn)]">Điều chỉnh</span>` : ''}
+    <div class="flex w-full items-center gap-2 pr-3">
+      <button data-act="edit-tx" data-id="${t.id}" class="press flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left">
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-base">${icon}</span>
+        <span class="min-w-0 flex-1">
+          <span class="flex flex-wrap items-center gap-1.5">
+            <span class="truncate text-[15px] font-medium">${escapeHtml(t.note || t.categoryName)}</span>
+            ${isDraft ? `<span class="rounded-md bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--accent)]">Nháp</span>` : ''}
+            ${isAdj ? `<span class="rounded-md bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--warn)]">Điều chỉnh</span>` : ''}
+            ${driveObj ? `<span class="rounded-md bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">${escapeHtml(driveObj.name)}</span>` : ''}
+          </span>
+          <span class="block text-[12px] text-[var(--text-3)]">${formatDateVN(t.date)} · ${walletTag} · ${escapeHtml(t.categoryName)}${t.member ? ` · 👤 ${escapeHtml(t.member)}` : ''}</span>
         </span>
-        <span class="block text-[12px] text-[var(--text-3)]">${formatDateVN(t.date)} · ${walletTag} · ${escapeHtml(t.categoryName)}</span>
-      </span>
-      <span class="shrink-0 text-[15px] font-semibold tabular-nums" style="color:${color}">${sign}${fmt(t.amount)}</span>
-    </button>
+        <span class="shrink-0 text-[15px] font-semibold tabular-nums" style="color:${color}">${sign}${fmt(t.amount)}</span>
+      </button>
+      ${t.receipt ? `<button data-act="view-receipt" data-id="${t.id}" aria-label="Xem ảnh hóa đơn"
+        class="press shrink-0 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1.5 text-[12px] font-medium text-[var(--text-2)]">🧾</button>` : ''}
+    </div>
   </li>`;
 }
 
 /* ============================================================
-   9. VIEW: LEDGER
+   11. VIEW: LEDGER
 ============================================================ */
-const ledgerFilter = { type: 'all', account: 'all', month: 'current', q: '' };
+const ledgerFilter = { type: 'all', account: 'all', month: 'current', drive: 'all', q: '' };
 
 function getFilteredLedger() {
   let list = DB.transactions.slice().sort((a, b) => b.createdAt - a.createdAt);
   if (ledgerFilter.type !== 'all') list = list.filter(t => t.type === ledgerFilter.type);
   if (ledgerFilter.account !== 'all') list = list.filter(t => (t.wallet || t.account) === ledgerFilter.account);
   if (ledgerFilter.month === 'current') list = list.filter(t => isThisMonth(t.date));
+  if (ledgerFilter.drive !== 'all') list = list.filter(t => t.driveId === ledgerFilter.drive);
   if (ledgerFilter.q) {
     const q = ledgerFilter.q.toLowerCase();
     list = list.filter(t =>
@@ -1481,6 +1821,12 @@ function renderLedger() {
         <span class="w-px bg-[var(--border)] mx-1"></span>
         ${chip('month', 'current', 'Tháng này')}${chip('month', 'all', 'Tất cả')}
       </div>
+      ${DB.drives.length > 1 ? `
+      <div class="mt-2 flex flex-wrap items-center gap-1.5 pt-2 border-t border-[var(--border)]">
+        <span class="text-[11px] text-[var(--text-3)]">Đợt thu:</span>
+        ${chip('drive', 'all', 'Mọi đợt')}
+        ${DB.drives.map(d => chip('drive', d.id, d.name)).join('')}
+      </div>` : ''}
     </section>
 
     <section id="ledgerTotals" class="card p-4 flex items-center gap-4 text-[13px]">
@@ -1502,12 +1848,12 @@ function chip(group, val, label) {
   return `<button data-chip="${group}:${val}"
     class="press rounded-lg px-2.5 py-1.5 text-[12px] font-medium
            ${active ? 'bg-[var(--accent)] text-[var(--on-accent)]' : 'bg-[var(--surface-2)] text-[var(--text)]'}">
-    ${label}
+    ${escapeHtml(label)}
   </button>`;
 }
 
 /* ============================================================
-   10. VIEW: CHECK (KIỂM ĐẾM TÁCH 2 VÍ + PHIẾU ĐIỀU CHỈNH LỆCH SỔ)
+   12. VIEW: CHECK (KIỂM ĐẾM TÁCH 2 VÍ + PHIẾU ĐIỀU CHỈNH LỆCH SỔ)
 ============================================================ */
 const checkState = {
   mode: 'direct',
@@ -1593,7 +1939,6 @@ function checkFormHTML(bal, existing) {
     <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Đối soát 2 ví độc lập</p>
     <p class="mt-1 text-[13px] text-[var(--text-2)]">Nếu có chênh lệch, hệ thống sẽ tự sinh phiếu <b>Điều chỉnh kiểm kê</b> để cân bằng lại sổ mà vẫn giữ nguyên lịch sử thu/chi.</p>
 
-    <!-- VÍ 1: TIỀN MẶT -->
     <div class="mt-4 rounded-2xl border border-[var(--border)] p-4">
       <div class="flex items-center justify-between">
         <div>
@@ -1641,7 +1986,6 @@ function checkFormHTML(bal, existing) {
       </div>
     </div>
 
-    <!-- VÍ 2: CHUYỂN KHOẢN / NGÂN HÀNG -->
     <div class="mt-4 rounded-2xl border border-[var(--border)] p-4">
       <div class="flex items-center justify-between">
         <div>
@@ -1828,7 +2172,7 @@ function checkHistoryHTML() {
 }
 
 /* ============================================================
-   11. VIEW: REPORTS
+   13. VIEW: REPORTS
 ============================================================ */
 let reportMonth = 'current';
 
@@ -1858,10 +2202,36 @@ function renderReports() {
       </div>
     </section>
 
+    <section class="card p-4">
+      <div class="flex items-center justify-between mb-2">
+        <p class="text-[11px] uppercase tracking-[0.12em] text-[var(--text-3)]">Tổng hợp theo Đợt thu / Sự kiện</p>
+        <button data-act="open-members" class="text-[12px] font-medium text-[var(--accent)]">Quản lý đợt →</button>
+      </div>
+      <div class="space-y-2.5">
+        ${DB.drives.map(d => {
+          const st = driveStats(d.id);
+          const pct = st.total > 0 ? Math.round((st.paid / st.total) * 100) : 0;
+          return `<div class="rounded-xl bg-[var(--surface-2)] p-3">
+            <div class="flex items-center justify-between text-[13px]">
+              <span class="font-semibold">${escapeHtml(d.name)} <span class="font-mono text-[11px] text-[var(--text-3)]">[${escapeHtml(d.shortCode)}]</span></span>
+              <span class="font-semibold tabular-nums text-[var(--income)]">${st.paid}/${st.total} bạn (${pct}%)</span>
+            </div>
+            <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface)]">
+              <div class="h-full rounded-full bg-[var(--income)]" style="width:${pct}%"></div>
+            </div>
+            <div class="mt-1.5 flex justify-between text-[11px] text-[var(--text-2)] tabular-nums">
+              <span>Đã thu: <b>${fmtMoney(st.collected)}</b></span>
+              <span>Còn thiếu: <b class="text-[var(--warn)]">${fmtMoney(st.shortfall)}</b></span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </section>
+
     ${!hasData ? `
       <section class="card p-8 text-center">
         <p class="text-4xl mb-3">📊</p>
-        <p class="text-[15px] font-medium">Chưa có dữ liệu để báo cáo</p>
+        <p class="text-[15px] font-medium">Chưa có dữ liệu giao dịch để vẽ biểu đồ</p>
         <p class="mt-1 text-[13px] text-[var(--text-3)]">Ghi giao dịch thành công (chọn Danh mục) để xem biểu đồ</p>
       </section>` : `
       <section class="card p-4">
@@ -1954,7 +2324,7 @@ function donutChartHTML(catMap, type) {
 }
 
 /* ============================================================
-   12. VIEW: SETTINGS
+   14. VIEW: SETTINGS
 ============================================================ */
 function renderSettings() {
   const initial = (currentUser.username || '?')[0].toUpperCase();
@@ -1963,6 +2333,7 @@ function renderSettings() {
   const isPreset = BANK_OPTIONS.some(b => b.code === currentBankCode);
   const viewOnlyUrl = `${location.origin}${location.pathname}?room=${encodeURIComponent(getRoomId())}&view=1`;
   const fbUid = firebaseAuthUser ? firebaseAuthUser.uid : '';
+  const activeDrive = getActiveDrive();
 
   return `
   <div class="space-y-4">
@@ -2018,7 +2389,7 @@ function renderSettings() {
     </section>
 
     <section class="card p-4 space-y-2.5">
-      <p class="text-[11px] uppercase tracking-[0.12em] text-[var(--text-3)]">Tài khoản nhận quỹ (VietQR)</p>
+      <p class="text-[11px] uppercase tracking-[0.12em] text-[var(--text-3)]">Tài khoản nhận quỹ (VietQR động)</p>
       <div>
         <label class="text-[12px] text-[var(--text-2)]">Ngân hàng (mặc định BIDV)</label>
         <select id="setBankSelect" class="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[14px] outline-none">
@@ -2042,21 +2413,21 @@ function renderSettings() {
           class="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[14px] uppercase outline-none" />
       </div>
       <div>
-        <label class="text-[12px] text-[var(--text-2)]">Nội dung chuyển khoản mặc định</label>
-        <input id="setBankNote" type="text" maxlength="50" placeholder="VD: NOP QUY - {ten} (hoặc để trống)"
-          value="${escapeHtml(bank.transferNote !== undefined ? bank.transferNote : 'NOP QUY - {ten}')}"
-          class="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[14px] uppercase outline-none" />
-        <p class="mt-1 text-[11px] text-[var(--text-3)]">Dùng <b>{ten}</b> để tự chèn tên bạn nộp quỹ, hoặc xoá trắng để người chuyển tự nhập.</p>
+        <label class="text-[12px] text-[var(--text-2)]">Mẫu nội dung chuyển khoản</label>
+        <input id="setBankNote" type="text" maxlength="50" placeholder="VD: {ten} dong quy {dot}"
+          value="${escapeHtml(bank.transferNote !== undefined ? bank.transferNote : '{ten} dong quy {dot}')}"
+          class="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[14px] outline-none" />
+        <p class="mt-1 text-[11px] text-[var(--text-3)]">Dùng <b>{ten}</b> (tên bạn nộp) và <b>{dot}</b> (mã đợt thu, VD: T11) → <i>Hoang Phong dong quy T11</i>.</p>
       </div>
       <div id="setBankQrPreviewWrap" class="pt-1 ${bank.accountNo ? '' : 'hidden'}">
-        <p class="text-[11px] text-[var(--text-3)] mb-1.5 text-center">Xem trước mã VietQR mẫu</p>
+        <p class="text-[11px] text-[var(--text-3)] mb-1.5 text-center">Xem trước mã VietQR động mẫu</p>
         <img id="setBankQrPreview" alt="VietQR Preview"
           src="${bank.accountNo ? buildVietQrUrl({
             bankCode: currentBankCode,
             accountNo: bank.accountNo,
             accountName: bank.accountName || '',
-            amount: DB.settings.termFee || 0,
-            customMemo: formatTransferMemo(bank.transferNote !== undefined ? bank.transferNote : 'NOP QUY - {ten}', 'NGUYEN VAN A')
+            amount: activeDrive?.amount || 50000,
+            customMemo: formatTransferMemo(bank.transferNote !== undefined ? bank.transferNote : '{ten} dong quy {dot}', 'Hoang Phong', 'TV01', activeDrive)
           }) : ''}"
           class="mx-auto h-44 w-44 rounded-xl border border-[var(--border)] bg-white object-contain" />
       </div>
@@ -2091,25 +2462,6 @@ function renderSettings() {
       <button data-act="demo-notify" class="press mt-2 w-full rounded-lg border border-[var(--border)] py-2 text-[13px]">🔔 Thử thông báo</button>
     </section>
 
-    <section class="card p-4">
-      <p class="text-[11px] uppercase tracking-[0.12em] text-[var(--text-3)] mb-3">Quỹ lớp</p>
-      <label class="flex items-center justify-between py-2">
-        <span class="text-[14px]">Mức quỹ / đợt</span>
-        <div class="flex items-center gap-1">
-          <input type="number" id="setFee" value="${DB.settings.termFee}" step="10000" min="0"
-            class="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-right text-[14px] tabular-nums" />
-          <span class="text-[13px] text-[var(--text-3)]">đ</span>
-        </div>
-      </label>
-      <label class="flex items-center justify-between py-2">
-        <div>
-          <span class="block text-[14px]">Tự động reset trạng thái qua ngày mới</span>
-          <span class="block text-[11px] text-[var(--text-3)]">Sang 00:00 ngày mới đưa người đã đóng về chưa đóng (vẫn giữ lịch sử)</span>
-        </div>
-        <input type="checkbox" id="setDailyResetMembers" ${DB.settings.dailyResetMembers !== false ? 'checked' : ''} class="h-5 w-5 accent-[var(--accent)]" />
-      </label>
-    </section>
-
     <section class="card p-4 space-y-2">
       <p class="text-[11px] uppercase tracking-[0.12em] text-[var(--text-3)] mb-1">Dữ liệu & Sao lưu</p>
       <button data-act="export-xlsx" class="press w-full rounded-lg bg-[var(--accent)] py-2.5 text-[13px] font-semibold text-[var(--on-accent)]">📊 Xuất Excel (.xlsx)</button>
@@ -2125,7 +2477,7 @@ function renderSettings() {
 }
 
 /* ============================================================
-   13. WIRE VIEW
+   15. WIRE VIEW
 ============================================================ */
 function wireView() {
   const v = $('#view');
@@ -2170,10 +2522,6 @@ function wireView() {
   if (notif) notif.onchange = (e) => { if (!requirePinIfNeeded()) return; DB.settings.notifDaily = e.target.checked; saveDB(); };
   const time = $('#setTime');
   if (time) time.onchange = (e) => { if (!requirePinIfNeeded()) return; DB.settings.notifTime = e.target.value; saveDB(); };
-  const fee = $('#setFee');
-  if (fee) fee.onchange = (e) => { if (!requirePinIfNeeded()) return; DB.settings.termFee = parseInt(e.target.value, 10) || 0; saveDB(); };
-  const dailyResetInp = $('#setDailyResetMembers');
-  if (dailyResetInp) dailyResetInp.onchange = (e) => { if (!requirePinIfNeeded()) return; DB.settings.dailyResetMembers = e.target.checked; saveDB(); };
 
   const bankSel = $('#setBankSelect');
   const bankCustom = $('#setBankCustom');
@@ -2189,7 +2537,7 @@ function wireView() {
       : (bankSel?.value || 'BIDV');
     const acc = (bankAcc?.value || '').trim();
     const holder = (bankHolder?.value || '').trim().toUpperCase();
-    const noteTpl = (bankNote?.value ?? '').trim().toUpperCase();
+    const noteTpl = (bankNote?.value ?? '').trim();
     DB.settings.bank = {
       bankCode: chosen || 'BIDV',
       accountNo: acc,
@@ -2199,6 +2547,7 @@ function wireView() {
     saveDB();
     const prevWrap = $('#setBankQrPreviewWrap');
     const prevImg = $('#setBankQrPreview');
+    const activeDrive = getActiveDrive();
     if (prevWrap && prevImg) {
       if (acc) {
         prevWrap.classList.remove('hidden');
@@ -2206,8 +2555,8 @@ function wireView() {
           bankCode: chosen || 'BIDV',
           accountNo: acc,
           accountName: holder,
-          amount: DB.settings.termFee || 0,
-          customMemo: formatTransferMemo(noteTpl, 'NGUYEN VAN A')
+          amount: activeDrive?.amount || 50000,
+          customMemo: formatTransferMemo(noteTpl, 'Hoang Phong', 'TV01', activeDrive)
         });
       } else {
         prevWrap.classList.add('hidden');
@@ -2395,7 +2744,6 @@ function saveCheck() {
   const diffCash = actualCash - bookCash;
   const diffBank = actualBank - bookBank;
 
-  // Tạo phiếu điều chỉnh độc lập cho từng ví bị lệch (Cụm 1)
   const adjCashTx = createReconcileTransaction('cash', bookCash, actualCash, checkState.noteCash);
   const adjBankTx = createReconcileTransaction('bank', bookBank, actualBank, checkState.noteBank);
 
@@ -2453,7 +2801,7 @@ function saveCheck() {
 }
 
 /* ============================================================
-   14. GLOBAL ACTION HANDLER
+   16. GLOBAL ACTION HANDLER
 ============================================================ */
 document.addEventListener('click', (e) => {
   const menu = $('#themeMenu');
@@ -2487,6 +2835,11 @@ document.addEventListener('click', (e) => {
     case 'open-members': openMembersSheet(); return;
     case 'open-inbox': if (requirePinIfNeeded()) openInboxSheet(); return;
     case 'edit-tx': if (requirePinIfNeeded()) openCaptureSheet(id); return;
+    case 'view-receipt': {
+      const tx = DB.transactions.find(x => x.id === id);
+      if (tx && tx.receipt) openReceiptModal(tx.receipt, tx.note || tx.categoryName || 'Hóa đơn');
+      return;
+    }
     case 'edit-check': if (requirePinIfNeeded()) { checkState.editing = true; render(); } return;
     case 'export-xlsx': exportExcel(); return;
     case 'export-csv': exportCSV(); return;
@@ -2497,7 +2850,7 @@ document.addEventListener('click', (e) => {
       return;
     case 'clear-data':
       if (!requirePinIfNeeded()) return;
-      if (confirm('Xoá toàn bộ giao dịch, kiểm đếm, thành viên của tài khoản này?\nSố dư sẽ về 0. Không hoàn tác được.')) {
+      if (confirm('Xoá toàn bộ giao dịch, kiểm đếm, đợt thu, thành viên của tài khoản này?\nSố dư sẽ về 0. Không hoàn tác được.')) {
         DB = emptyDB(); saveDB();
         balanceHidden = false;
         document.documentElement.dataset.theme = DB.settings.theme;
@@ -2537,18 +2890,20 @@ if (fabEl) {
 }
 
 /* ============================================================
-   15. SHEET: QUICK CAPTURE
+   17. SHEET: QUICK CAPTURE (ĐỒNG BỘ THU QUỸ + NÉN HÓA ĐƠN < 100KB)
 ============================================================ */
 const sheetState = {
   type: 'in', amount: 0, category: null, account: 'cash',
-  date: todayISO(), member: '', note: '', receipt: null,
+  date: todayISO(), member: '', driveId: '', note: '', receipt: null, receiptKB: 0,
   fromNoti: false, editId: null,
 };
 
 function openCaptureSheet(editId = null) {
+  const activeDrive = getActiveDrive();
   sheetState.type = 'in'; sheetState.amount = 0; sheetState.category = null;
   sheetState.account = 'cash'; sheetState.date = todayISO();
-  sheetState.member = ''; sheetState.note = ''; sheetState.receipt = null;
+  sheetState.member = ''; sheetState.driveId = activeDrive?.id || '';
+  sheetState.note = ''; sheetState.receipt = null; sheetState.receiptKB = 0;
   sheetState.fromNoti = false; sheetState.editId = editId;
 
   if (editId) {
@@ -2557,7 +2912,9 @@ function openCaptureSheet(editId = null) {
       sheetState.type = t.type; sheetState.amount = t.amount;
       sheetState.category = t.category; sheetState.account = t.wallet || t.account || 'cash';
       sheetState.date = t.date; sheetState.member = t.member || '';
+      sheetState.driveId = t.driveId || activeDrive?.id || '';
       sheetState.note = t.note || ''; sheetState.receipt = t.receipt || null;
+      sheetState.receiptKB = t.receipt ? Math.max(1, Math.round(estimateDataUrlBytes(t.receipt) / 1024)) : 0;
       sheetState.fromNoti = t.status === 'draft' && !t.category;
     }
   }
@@ -2605,6 +2962,7 @@ function renderCaptureSheet() {
         <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Danh mục</p>
         <div id="capCats" class="mt-2 flex flex-wrap gap-1.5"></div>
       </div>
+
       <div class="mt-5">
         <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Ví tiền (Nguồn tiền)</p>
         <div class="mt-2 grid grid-cols-2 gap-1.5">
@@ -2612,6 +2970,7 @@ function renderCaptureSheet() {
           <button data-cap-acc="bank" class="cap-acc press rounded-xl border border-[var(--border)] py-2.5 text-[13px] font-medium">🏦 Chuyển khoản</button>
         </div>
       </div>
+
       <div class="mt-4 grid grid-cols-2 gap-3">
         <div>
           <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Ngày</p>
@@ -2619,31 +2978,47 @@ function renderCaptureSheet() {
             class="mt-1.5 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[14px] outline-none" />
         </div>
         <div id="capMemberWrap" style="${sheetState.type === 'in' ? '' : 'display:none'}">
-          <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Người nộp</p>
+          <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Người nộp (tự gạch tên)</p>
           <select id="capMember" class="mt-1.5 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[14px] outline-none">
             <option value="">— Cả lớp —</option>
             ${DB.members.map(m => `<option value="${escapeHtml(m.name)}" ${m.name === sheetState.member ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join('')}
           </select>
         </div>
       </div>
+
+      <div id="capDriveWrap" class="mt-3" style="${sheetState.type === 'in' && sheetState.member ? '' : 'display:none'}">
+        <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Đồng bộ vào Đợt thu</p>
+        <select id="capDrive" class="mt-1.5 w-full rounded-xl border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-2 text-[13px] font-medium text-[var(--text)] outline-none">
+          ${DB.drives.map(d => `<option value="${escapeHtml(d.id)}" ${d.id === sheetState.driveId ? 'selected' : ''}>${escapeHtml(d.name)} (${fmtMoney(d.amount)})</option>`).join('')}
+        </select>
+        <p class="mt-1 text-[11px] text-[var(--income)]">✓ Khi lưu, hệ thống sẽ tự cập nhật trạng thái đóng quỹ của bạn này.</p>
+      </div>
+
       <div class="mt-4">
         <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Ghi chú</p>
-        <textarea id="capNote" rows="2" placeholder="VD: Tiền quỹ tháng 11"
+        <textarea id="capNote" rows="2" placeholder="VD: Tiền quỹ tháng 11 / Mua nước liên hoan"
           class="mt-1.5 w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[14px] outline-none placeholder:text-[var(--text-3)]"
         >${escapeHtml(sheetState.note)}</textarea>
       </div>
+
       <div class="mt-4 pb-2">
         <label for="capReceipt" class="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-dashed border-[var(--border)] px-3 py-2.5 text-[13px] text-[var(--text-2)] hover:bg-[var(--surface-2)]">
-          <span>📷</span><span class="flex-1">Thêm ảnh hoá đơn</span><span class="text-[var(--text-3)]">tuỳ chọn</span>
+          <span>📷</span><span class="flex-1">Chụp / chọn ảnh hóa đơn minh chứng</span><span class="text-[var(--text-3)]">tự nén &lt;100KB</span>
         </label>
         <input id="capReceipt" type="file" accept="image/*" />
         <div id="capReceiptPrev" class="mt-2 ${sheetState.receipt ? '' : 'hidden'}">
-          ${sheetState.receipt ? `<div class="relative inline-block">
-            <img src="${sheetState.receipt}" class="h-16 w-16 rounded-lg object-cover" alt="hoá đơn" />
-            <button data-cap-rm-receipt class="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--text)] text-[11px] text-[var(--bg)]">✕</button>
-          </div>` : ''}
+          ${sheetState.receipt ? `
+            <div class="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2">
+              <img id="capReceiptThumb" src="${sheetState.receipt}" class="h-14 w-14 rounded-lg object-cover cursor-pointer" alt="hoá đơn" />
+              <div class="min-w-0 flex-1 text-left">
+                <p class="text-[12px] font-semibold text-[var(--income)]">✓ Đã nén ảnh hóa đơn (${sheetState.receiptKB} KB)</p>
+                <p class="text-[11px] text-[var(--text-3)]">Bấm vào ảnh để xem phóng to</p>
+              </div>
+              <button type="button" data-cap-rm-receipt class="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--text)] text-[11px] text-[var(--bg)]">✕</button>
+            </div>` : ''}
         </div>
       </div>
+
       <p id="capDraftHint" class="mb-2 hidden rounded-lg bg-[var(--surface-2)] px-3 py-2 text-[12px] text-[var(--text-2)]">
         Chưa chọn danh mục — khoản này sẽ vào <b>Hộp thư nháp</b> để phân loại sau.
       </p>
@@ -2665,6 +3040,7 @@ function wireCaptureSheet() {
       sheetState.category = null;
       renderCapType(); renderCapCats();
       $('#capMemberWrap').style.display = sheetState.type === 'in' ? '' : 'none';
+      $('#capDriveWrap').style.display = (sheetState.type === 'in' && sheetState.member) ? '' : 'none';
       updateCapSave();
     };
   });
@@ -2695,18 +3071,55 @@ function wireCaptureSheet() {
   });
 
   $('#capDate').onchange = (e) => { sheetState.date = e.target.value; };
-  $('#capMember').onchange = (e) => { sheetState.member = e.target.value; };
+  $('#capMember').onchange = (e) => {
+    sheetState.member = e.target.value;
+    const driveWrap = $('#capDriveWrap');
+    if (driveWrap) {
+      driveWrap.style.display = (sheetState.type === 'in' && sheetState.member) ? '' : 'none';
+    }
+    if (sheetState.type === 'in' && sheetState.member && !sheetState.category) {
+      sheetState.category = 'quy';
+      renderCapCats();
+      updateCapSave();
+    }
+    if (sheetState.type === 'in' && sheetState.member && !sheetState.amount) {
+      const mem = DB.members.find(m => m.name === sheetState.member);
+      const drv = getDriveById(sheetState.driveId);
+      if (mem && drv) {
+        const st = getMemberDriveStatus(mem.id, drv.id);
+        const suggested = st.remaining > 0 ? st.remaining : drv.amount;
+        if (suggested > 0) {
+          sheetState.amount = suggested;
+          amountInp.value = suggested;
+          fmtDisp.textContent = '= ' + fmt(suggested) + 'đ';
+          updateCapSave();
+        }
+      }
+    }
+  };
+
+  const capDriveSel = $('#capDrive');
+  if (capDriveSel) {
+    capDriveSel.onchange = (e) => { sheetState.driveId = e.target.value; };
+  }
+
   $('#capNote').oninput = (e) => { sheetState.note = e.target.value; };
 
   $('#capReceipt').onchange = (e) => {
     const f = e.target.files[0]; if (!f) return;
-    compressImage(f, 800, (compressedBase64) => {
+    compressReceiptUnder100KB(f, (compressedBase64, sizeKB) => {
       sheetState.receipt = compressedBase64;
+      sheetState.receiptKB = sizeKB;
       $('#capReceiptPrev').classList.remove('hidden');
-      $('#capReceiptPrev').innerHTML = `<div class="relative inline-block">
-        <img src="${sheetState.receipt}" class="h-16 w-16 rounded-lg object-cover" alt="hoá đơn" />
-        <button data-cap-rm-receipt class="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--text)] text-[11px] text-[var(--bg)]">✕</button>
-      </div>`;
+      $('#capReceiptPrev').innerHTML = `
+        <div class="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2">
+          <img id="capReceiptThumb" src="${sheetState.receipt}" class="h-14 w-14 rounded-lg object-cover cursor-pointer" alt="hoá đơn" />
+          <div class="min-w-0 flex-1 text-left">
+            <p class="text-[12px] font-semibold text-[var(--income)]">✓ Đã nén ảnh hóa đơn (${sizeKB} KB)</p>
+            <p class="text-[11px] text-[var(--text-3)]">Bấm vào ảnh để xem phóng to</p>
+          </div>
+          <button type="button" data-cap-rm-receipt class="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--text)] text-[11px] text-[var(--bg)]">✕</button>
+        </div>`;
       wireCapReceiptRemove();
     });
   };
@@ -2737,10 +3150,17 @@ function wireCapReceiptRemove() {
   $$('[data-cap-rm-receipt]').forEach(btn => {
     btn.onclick = () => {
       sheetState.receipt = null;
+      sheetState.receiptKB = 0;
       $('#capReceipt').value = '';
       $('#capReceiptPrev').classList.add('hidden');
     };
   });
+  const thumb = $('#capReceiptThumb');
+  if (thumb) {
+    thumb.onclick = () => {
+      if (sheetState.receipt) openReceiptModal(sheetState.receipt, sheetState.note || 'Ảnh hóa đơn');
+    };
+  }
 }
 
 function renderCapType() {
@@ -2785,82 +3205,120 @@ function saveCapture() {
   if (sheetState.amount <= 0) return;
   const isDraft = !sheetState.category;
   const cat = sheetState.category ? getCategory(sheetState.type, sheetState.category) : null;
+  const linkedDriveId = (sheetState.type === 'in' && sheetState.member)
+    ? (sheetState.driveId || getActiveDrive()?.id || null)
+    : null;
+  const linkedDrive = linkedDriveId ? getDriveById(linkedDriveId) : null;
+  const autoNote = sheetState.note.trim() || (
+    (sheetState.type === 'in' && sheetState.member && linkedDrive)
+      ? `Thu ${linkedDrive.name} · ${sheetState.member}`
+      : ''
+  );
+
   const tx = {
     id: sheetState.editId || uid(),
-    type: sheetState.type, amount: sheetState.amount,
+    type: sheetState.type,
+    amount: sheetState.amount,
     category: sheetState.category,
     categoryName: cat ? cat.name : 'Chưa phân loại',
+    driveId: linkedDriveId,
     wallet: sheetState.account,
     account: sheetState.account,
     date: sheetState.date,
-    member: sheetState.member, note: sheetState.note,
+    member: sheetState.type === 'in' ? sheetState.member : '',
+    note: autoNote,
     receipt: sheetState.receipt,
     status: isDraft ? 'draft' : 'done',
     createdAt: Date.now(),
   };
+
   if (sheetState.editId) {
     const i = DB.transactions.findIndex(t => t.id === sheetState.editId);
     if (i >= 0) DB.transactions[i] = { ...DB.transactions[i], ...tx, createdAt: DB.transactions[i].createdAt };
-  } else DB.transactions.push(tx);
-  saveDB(); closeSheet();
+  } else {
+    DB.transactions.push(tx);
+  }
+
+  saveDB();
+  closeSheet();
+
+  const syncedMsg = (!isDraft && tx.member && linkedDrive)
+    ? ` & đã cập nhật ${tx.member} vào ${linkedDrive.name}`
+    : '';
   toast(isDraft
     ? `Đã lưu nháp ${fmtMoney(sheetState.amount)} vào Hộp thư nháp`
-    : `Đã ghi ${sheetState.type === 'in' ? '+' : '−'}${fmt(sheetState.amount)}đ · ${tx.categoryName}`,
+    : `Đã ghi ${sheetState.type === 'in' ? '+' : '−'}${fmt(sheetState.amount)}đ${syncedMsg}`,
     isDraft ? null : (sheetState.type === 'in' ? 'var(--income)' : 'var(--expense)'));
   render();
 }
 
 /* ============================================================
-   16. SHEET: MEMBERS + VIETQR
+   18. SHEET: THU QUỸ THEO ĐỢT / SỰ KIỆN + VIETQR ĐỘNG + NHẮC QUỸ
 ============================================================ */
 let memberFilterTab = 'all';
 
 function openMembersSheet() {
-  checkDailyMemberReset(true);
   renderMembersSheet();
   showSheet();
 }
 
-function renderMemberRowsHtml(list, query = '') {
+function renderMemberRowsHtml(list, query = '', driveId = null) {
+  const drive = getDriveById(driveId);
   const qNorm = stripVietnamese(query || '').toLowerCase();
-  const rows = qNorm
+  const filtered = qNorm
     ? list.filter(m => stripVietnamese(m.name).toLowerCase().includes(qNorm) || stripVietnamese(m.code || '').toLowerCase().includes(qNorm))
-    : list;
+    : list.slice();
+
+  // Đưa người đã báo chuyển khoản (chờ duyệt) lên đầu danh sách; sau khi duyệt xong tự quay về thứ tự ban đầu
+  const rows = filtered.sort((a, b) => {
+    const aPending = !!getMemberDriveStatus(a.id, drive?.id).pendingTs;
+    const bPending = !!getMemberDriveStatus(b.id, drive?.id).pendingTs;
+    if (aPending !== bPending) return aPending ? -1 : 1;
+    return 0;
+  });
+
   if (!rows.length) {
     return `<div class="py-8 text-center text-[13px] text-[var(--text-3)]">Không tìm thấy thành viên phù hợp</div>`;
   }
   return `<ul class="divide-y divide-[var(--border)]">
     ${rows.map(m => {
-      const paid = isMemberPaidToday(m.id);
-      const paidObj = DB.memberPaid?.[m.id];
-      const paidTimeStr = paid ? getMemberPaidLabel(m.id) : '';
-      const paidAmtStr = (paid && typeof paidObj === 'object' && typeof paidObj.amount === 'number') ? ` · ${fmtMoney(paidObj.amount)}` : '';
-      const pending = !paid && !!DB.memberPending?.[m.id];
+      const st = getMemberDriveStatus(m.id, drive?.id);
+      const paid = st.isFullyPaid;
+      const partial = st.isPartial;
+      const pending = !!st.pendingTs;
+      const paidTimeStr = (paid || partial) ? getMemberPaidLabel(m.id, drive?.id) : '';
       const guestMode = isGuestLocked();
-      return `<li class="py-2.5">
+
+      return `<li class="py-2.5 ${pending ? 'bg-[var(--draft-bg)] -mx-2 px-2 rounded-xl' : ''}">
         <div class="flex min-w-0 items-center gap-2">
           <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[11px] font-semibold">${escapeHtml(m.code || m.name[0])}</span>
-          <p class="min-w-0 flex-1 truncate text-[13.5px] font-medium leading-snug">${escapeHtml(m.name)}</p>
+          <button type="button" data-qr-member="${m.id}" class="min-w-0 flex-1 truncate text-left text-[13.5px] font-medium leading-snug hover:underline">
+            ${escapeHtml(m.name)}
+          </button>
           ${guestMode
-            ? `<span class="shrink-0 text-[11px] font-mono text-[var(--text-3)]">${escapeHtml(m.code || '')}${pending ? ' · Đã gửi báo CK' : ''}</span>`
+            ? `<span class="shrink-0 text-[11px] font-mono text-[var(--text-3)]">${paid ? '✓ Đã đóng' : (pending ? '⏳ Đã báo CK' : (partial ? `Thiếu ${fmt(st.remaining)}đ` : escapeHtml(m.code || '')))}</span>`
             : (paid
-              ? `<span class="shrink-0 text-[11px] font-mono text-[var(--income)]">🕒 ${escapeHtml(paidTimeStr)}${escapeHtml(paidAmtStr)}</span>`
-              : (pending
-                ? `<span class="shrink-0 text-[11px] font-medium text-[var(--expense)]">⏳ Chờ duyệt CK</span>`
-                : `<span class="shrink-0 text-[11px] font-mono text-[var(--text-3)]">${escapeHtml(m.code || '')}</span>`))}
+              ? `<span class="shrink-0 text-[11px] font-mono text-[var(--income)]">🕒 ${escapeHtml(paidTimeStr)}</span>`
+              : (partial
+                ? `<span class="shrink-0 text-[11px] font-semibold text-[var(--expense)]">Đã đóng ${fmt(st.paidAmount)}đ · Thiếu ${fmt(st.remaining)}đ</span>`
+                : (pending
+                  ? `<span class="shrink-0 text-[11px] font-medium text-[var(--expense)]">⏳ Đã báo CK</span>`
+                  : `<span class="shrink-0 text-[11px] font-mono text-[var(--text-3)]">Thiếu ${fmt(st.remaining)}đ</span>`)))}
         </div>
         <div class="mt-1.5 flex items-center justify-end gap-1.5">
-          ${(guestMode || !paid) ? `<button data-qr-member="${m.id}" class="press rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-2.5 py-1 text-[11.5px] font-semibold text-[var(--accent)] whitespace-nowrap">QR</button>` : ''}
+          ${!paid ? `<button data-qr-member="${m.id}" class="press rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-2.5 py-1 text-[11.5px] font-semibold text-[var(--accent)] whitespace-nowrap">
+            QR ${st.remaining > 0 ? `(${fmt(st.remaining)}đ)` : ''}
+          </button>` : ''}
           ${guestMode
-            ? `<button data-report-member="${m.id}" class="press rounded-lg px-2.5 py-1 text-[11.5px] font-semibold whitespace-nowrap ${pending ? 'border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-2)]' : 'bg-[var(--accent)] text-[var(--on-accent)]'}">
-                ${pending ? 'Đã báo CK' : 'Đã CK'}
-              </button>`
+            ? (!paid ? `<button data-qr-member="${m.id}" class="press rounded-lg px-2.5 py-1 text-[11.5px] font-semibold whitespace-nowrap ${pending ? 'border border-[var(--income)] bg-[var(--accent-soft)] text-[var(--income)]' : 'bg-[var(--accent)] text-[var(--on-accent)]'}">
+                ${pending ? '✓ Tôi đã CK (Chờ duyệt)' : 'Quét QR & Báo CK'}
+              </button>` : '')
             : `
               <button data-toggle-member="${m.id}" class="press rounded-lg px-2.5 py-1 text-[12px] font-medium whitespace-nowrap
                 ${paid
                   ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
                   : (pending ? 'bg-[var(--expense)] text-white' : 'bg-[var(--surface-2)] text-[var(--text-2)]')}">
-                ${paid ? '✓ Đã đóng' : (pending ? 'Duyệt ✓' : 'Chưa đóng')}
+                ${paid ? '✓ Đã đóng' : (pending ? 'Duyệt CK ✓' : (partial ? 'Thu nốt ✓' : 'Chưa đóng'))}
               </button>
               <button data-remove-member="${m.id}" aria-label="Xoá thành viên"
                 class="press flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--warn)]">×</button>`}
@@ -2870,26 +3328,26 @@ function renderMemberRowsHtml(list, query = '') {
   </ul>`;
 }
 
-function wireMemberRowEvents(container) {
+function wireMemberRowEvents(container, driveId) {
+  const drive = getDriveById(driveId);
   $$('[data-qr-member]', container).forEach(btn => {
     btn.onclick = () => {
       const m = DB.members.find(x => x.id === btn.dataset.qrMember);
-      if (m) openMemberQr(m.name, DB.settings.termFee, m.id, m.code || '');
-    };
-  });
-  $$('[data-report-member]', container).forEach(btn => {
-    btn.onclick = () => {
-      reportMemberTransfer(btn.dataset.reportMember);
+      if (!m) return;
+      const st = getMemberDriveStatus(m.id, drive?.id);
+      const amtToPay = st.remaining > 0 ? st.remaining : (drive?.amount || 0);
+      openMemberQr(m.name, amtToPay, m.id, m.code || '', drive?.id);
     };
   });
   $$('[data-toggle-member]', container).forEach(btn => {
     btn.onclick = () => {
       if (!requirePinIfNeeded()) return;
       const id = btn.dataset.toggleMember;
-      const nextPaid = !isMemberPaidToday(id);
-      setMemberPaidStatus(id, nextPaid);
-      saveDB(); renderMembersSheet();
-      if (currentView === 'home') render();
+      const st = getMemberDriveStatus(id, drive?.id);
+      setMemberPaidStatus(id, !st.isFullyPaid, { driveId: drive?.id });
+      saveDB();
+      renderMembersSheet();
+      if (currentView === 'home' || currentView === 'reports') render();
     };
   });
   $$('[data-remove-member]', container).forEach(btn => {
@@ -2898,25 +3356,71 @@ function wireMemberRowEvents(container) {
       const id = btn.dataset.removeMember;
       const m = DB.members.find(x => x.id === id);
       if (!m) return;
-      if (!confirm(`Xoá "${m.name}" khỏi danh sách?`)) return;
+      if (!confirm(`Xoá "${m.name}" khỏi danh sách lớp?`)) return;
       DB.members = DB.members.filter(x => x.id !== id);
-      delete DB.memberPaid[id];
-      if (DB.memberPending) delete DB.memberPending[id];
-      saveDB(); renderMembersSheet();
-      if (currentView === 'home') render();
+      DB.drives.forEach(d => {
+        if (d.paid) delete d.paid[id];
+        if (d.pending) delete d.pending[id];
+      });
+      syncLegacyMirrorsFromActiveDrive();
+      saveDB();
+      renderMembersSheet();
+      if (currentView === 'home' || currentView === 'reports') render();
     };
   });
 }
 
+function buildSmartRemindMessage(drive) {
+  const dObj = drive || getActiveDrive();
+  if (!dObj) return '';
+  const bank = DB.settings?.bank || {};
+  const unpaidLines = [];
+  let totalMissing = 0;
+
+  DB.members.forEach((m) => {
+    const st = getMemberDriveStatus(m.id, dObj.id);
+    if (!st.isFullyPaid) {
+      const miss = st.remaining > 0 ? st.remaining : dObj.amount;
+      totalMissing += miss;
+      unpaidLines.push(`${unpaidLines.length + 1}. ${m.name} — thiếu ${fmtMoney(miss)}`);
+    }
+  });
+
+  if (!unpaidLines.length) return '';
+
+  const viewUrl = `${location.origin}${location.pathname}?room=${encodeURIComponent(getRoomId())}&view=1`;
+  const stkLine = bank.accountNo
+    ? `🏦 STK: ${bank.accountNo} (${(bank.bankCode || 'BIDV').toUpperCase()})${bank.accountName ? ` - ${bank.accountName}` : ''}`
+    : `💵 Nộp trực tiếp cho Thủ quỹ hoặc chuyển khoản quỹ lớp`;
+  const memoExample = formatTransferMemo(
+    bank.transferNote !== undefined ? bank.transferNote : '{ten} dong quy {dot}',
+    'Ten Ban',
+    'TV01',
+    dObj
+  );
+
+  return [
+    `📢 NHẮC ĐÓNG QUỸ: ${dObj.name.toUpperCase()} (${fmtMoney(dObj.amount)}/bạn)`,
+    `Hiện còn ${unpaidLines.length} bạn chưa hoàn thành (tổng thiếu ${fmtMoney(totalMissing)}):`,
+    ...unpaidLines,
+    ``,
+    stkLine,
+    `📝 Nội dung CK: ${memoExample}`,
+    `🔗 Link xem & quét mã VietQR tự điền số tiền: ${viewUrl}`,
+    `Cảm ơn cả lớp 🌿`
+  ].join('\n');
+}
+
 function renderMembersSheet() {
-  checkDailyMemberReset(true);
   if (isGuestLocked()) memberFilterTab = 'all';
-  const stats = membersStats();
-  const logs = Array.isArray(DB.paymentLogs) ? DB.paymentLogs : [];
+  const activeDrive = getActiveDrive();
+  const stats = driveStats(activeDrive?.id);
+  const logs = (Array.isArray(DB.paymentLogs) ? DB.paymentLogs : []).filter(lg => !lg.driveId || lg.driveId === activeDrive?.id);
+
   const filteredMembers = DB.members.filter(m => {
-    const paid = isMemberPaidToday(m.id);
-    if (memberFilterTab === 'unpaid') return !paid;
-    if (memberFilterTab === 'paid') return paid;
+    const st = getMemberDriveStatus(m.id, activeDrive?.id);
+    if (memberFilterTab === 'unpaid') return !st.isFullyPaid;
+    if (memberFilterTab === 'paid') return st.isFullyPaid;
     return true;
   });
 
@@ -2924,45 +3428,65 @@ function renderMembersSheet() {
   el.innerHTML = `
     <div class="flex justify-center pt-2.5 md:hidden"><span class="h-1.5 w-10 rounded-full bg-[var(--border)]"></span></div>
     <header class="flex items-center justify-between px-5 pb-2 pt-3">
-      <div>
-        <h1 class="text-[18px] font-semibold">${isGuestLocked() ? 'Đóng quỹ lớp' : `Thành viên lớp · ${formatDateVN(todayISO())}`}</h1>
-        <div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-[var(--text-3)]">
+      <div class="min-w-0 flex-1">
+        <h1 class="text-[18px] font-semibold">${isGuestLocked() ? 'Đóng quỹ lớp (VietQR)' : 'Thu quỹ theo Đợt / Sự kiện'}</h1>
+        <p class="text-[12px] text-[var(--text-3)]">
           ${isGuestLocked()
-            ? `<span>Mức quỹ: <strong class="text-[var(--text)] tabular-nums">${fmtMoney(DB.settings.termFee)}</strong> · Chọn QR để chuyển tiền rồi bấm Đã CK</span>`
-            : `<span>Mức quỹ:</span>
-               <input id="quickTermFeeInp" type="number" min="0" step="1000" value="${Number(DB.settings.termFee) || 0}"
-                 class="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[12px] font-semibold text-[var(--text)] tabular-nums outline-none" />
-               <span>đ · ${DB.settings.dailyResetMembers !== false ? 'Tự làm mới mỗi ngày' : 'Giữ trạng thái theo đợt'}</span>`}
-        </div>
+            ? 'Chọn đợt thu, bấm tên bạn để mở QR — hệ thống tự báo "Tôi đã CK"'
+            : 'Người đã báo CK tự lên đầu · Duyệt xong quay về thứ tự ban đầu'}
+        </p>
       </div>
-      ${!isGuestLocked() ? `<button data-sheet-close class="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-2)] hover:bg-[var(--surface-2)]">✕</button>` : ''}
+      ${!isGuestLocked() ? `<button data-sheet-close class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--text-2)] hover:bg-[var(--surface-2)]">✕</button>` : ''}
     </header>
 
+    <!-- THANH CHỌN & TẠO ĐỢT THU / SỰ KIỆN RIÊNG -->
+    <div class="mx-5 mb-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2.5 space-y-2">
+      <div class="flex items-center gap-1.5">
+        <select id="driveSelect" class="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-[13px] font-semibold outline-none">
+          ${DB.drives.map(d => `<option value="${escapeHtml(d.id)}" ${d.id === activeDrive?.id ? 'selected' : ''}>📌 ${escapeHtml(d.name)} (${fmtMoney(d.amount)})</option>`).join('')}
+        </select>
+        ${!isGuestLocked() ? `
+          <button type="button" id="newDriveBtn" class="press shrink-0 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--on-accent)]">+ Đợt mới</button>
+          ${DB.drives.length > 1 ? `<button type="button" id="delDriveBtn" aria-label="Xoá đợt thu" class="press shrink-0 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--warn)]">🗑️</button>` : ''}
+        ` : ''}
+      </div>
+
+      ${!isGuestLocked() && activeDrive ? `
+      <div class="flex items-center justify-between gap-2 text-[12px]">
+        <span class="text-[var(--text-2)]">Mức thu đợt này:</span>
+        <div class="flex items-center gap-1">
+          <input id="quickDriveFeeInp" type="number" min="0" step="5000" value="${Number(activeDrive.amount) || 0}"
+            class="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-right text-[12px] font-semibold tabular-nums outline-none" />
+          <span class="text-[var(--text-3)]">đ</span>
+        </div>
+      </div>` : ''}
+    </div>
+
     ${!isGuestLocked() && stats.total > 0 ? `
-    <div class="mx-5 flex items-center gap-2 rounded-xl bg-[var(--surface-2)] p-3">
-      <div class="flex-1 text-center"><p class="text-[20px] font-bold text-[var(--income)] tabular-nums">${stats.paid}</p><p class="text-[11px] text-[var(--text-3)]">Đã đóng</p></div>
+    <div class="mx-5 flex items-center gap-2 rounded-xl bg-[var(--surface-2)] p-2.5">
+      <div class="flex-1 text-center"><p class="text-[18px] font-bold text-[var(--income)] tabular-nums">${stats.paid}/${stats.total}</p><p class="text-[11px] text-[var(--text-3)]">Đã đóng đủ</p></div>
       <div class="h-8 w-px bg-[var(--border)]"></div>
-      <div class="flex-1 text-center"><p class="text-[20px] font-bold text-[var(--warn)] tabular-nums">${stats.unpaid}</p><p class="text-[11px] text-[var(--text-3)]">Chưa đóng</p></div>
+      <div class="flex-1 text-center"><p class="text-[18px] font-bold text-[var(--warn)] tabular-nums">${stats.unpaid}</p><p class="text-[11px] text-[var(--text-3)]">Chưa xong</p></div>
       <div class="h-8 w-px bg-[var(--border)]"></div>
-      <div class="flex-1 text-center"><p class="text-[20px] font-bold tabular-nums">${stats.total}</p><p class="text-[11px] text-[var(--text-3)]">Tổng</p></div>
+      <div class="flex-1 text-center"><p class="text-[15px] font-bold text-[var(--income)] tabular-nums">${fmtMoney(stats.collected)}</p><p class="text-[11px] text-[var(--text-3)]">Đã thu đợt này</p></div>
     </div>` : ''}
 
     ${memberFilterTab !== 'logs' && DB.members.length > 0 ? `
     <div class="mx-5 mt-2">
-      <input id="memberSearchInp" type="text" placeholder="Tìm nhanh tên hoặc mã (VD: Kiên, TV05)..."
+      <input id="memberSearchInp" type="text" placeholder="🔍 Tìm nhanh tên hoặc mã (VD: Phong, TV01)..."
         class="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[13px] outline-none placeholder:text-[var(--text-3)]" />
     </div>` : ''}
 
     ${!isGuestLocked() && stats.pending > 0 ? `
     <div class="mx-5 mt-2 flex items-center justify-between rounded-xl border border-[var(--expense)] bg-[var(--draft-bg)] px-3.5 py-2 text-[12px]">
-      <span class="font-medium text-[var(--expense)]">💸 Có ${stats.pending} bạn báo đã chuyển khoản</span>
-      <span class="text-[11px] text-[var(--text-3)]">Bấm Duyệt ✓ bên dưới</span>
+      <span class="font-medium text-[var(--expense)]">💸 Có ${stats.pending} bạn đã báo CK (đã đưa lên đầu)</span>
+      <span class="text-[11px] text-[var(--text-3)]">Bấm Duyệt CK ✓</span>
     </div>` : ''}
 
-    <div id="memberListScroll" class="scroll-y flex-1 overflow-y-auto px-5 pb-3 pt-3">
+    <div id="memberListScroll" class="scroll-y flex-1 overflow-y-auto px-5 pb-3 pt-2">
       ${memberFilterTab === 'logs'
         ? (logs.length === 0
-            ? `<div class="py-10 text-center text-[13px] text-[var(--text-3)]">Chưa có lịch sử nộp quỹ nào được ghi lại</div>`
+            ? `<div class="py-10 text-center text-[13px] text-[var(--text-3)]">Chưa có lịch sử nộp quỹ trong đợt này</div>`
             : `<ul class="divide-y divide-[var(--border)]">
                 ${logs.map(lg => `
                   <li class="flex items-center justify-between gap-2 py-2.5">
@@ -2979,7 +3503,7 @@ function renderMembersSheet() {
                 <p class="text-[14px] font-medium">Chưa có thành viên nào</p>
                 <p class="mt-1 text-[12px] text-[var(--text-3)]">Thêm tên bên dưới hoặc dán danh sách lớp vào</p>
               </div>`
-            : `<div id="memberRowsContainer">${renderMemberRowsHtml(filteredMembers, '')}</div>`)}
+            : `<div id="memberRowsContainer">${renderMemberRowsHtml(filteredMembers, '', activeDrive?.id)}</div>`)}
 
       ${!isGuestLocked() ? `
       <div class="mt-3 flex gap-1.5 overflow-x-auto pb-1">
@@ -2987,7 +3511,7 @@ function renderMembersSheet() {
           { id: 'all', label: `Tất cả (${stats.total})` },
           { id: 'unpaid', label: `Chưa đóng (${stats.unpaid})` },
           { id: 'paid', label: `Đã đóng (${stats.paid})` },
-          { id: 'logs', label: `Lịch sử nộp (${logs.length})` }
+          { id: 'logs', label: `Lịch sử (${logs.length})` }
         ].map(tab => `
           <button data-member-tab="${tab.id}" class="press shrink-0 rounded-lg px-2.5 py-1.5 text-[12px] font-medium
             ${memberFilterTab === tab.id ? 'bg-[var(--accent)] text-[var(--on-accent)]' : 'bg-[var(--surface-2)] text-[var(--text-2)]'}">
@@ -3002,39 +3526,96 @@ function renderMembersSheet() {
         <button id="addMemberBtn" class="press rounded-xl bg-[var(--accent)] px-4 py-2.5 text-[13px] font-semibold text-[var(--on-accent)]">Thêm</button>
       </div>
       <button data-import-members class="mt-2 w-full rounded-xl border border-[var(--border)] py-2 text-[12px] text-[var(--text-2)]">
-        📋 Dán danh sách (mỗi dòng một tên)
+        📋 Dán danh sách lớp (mỗi dòng một tên)
       </button>` : ''}
     </div>
 
     ${!isGuestLocked() ? `
     <footer class="border-t border-[var(--border)] px-5 py-3" style="padding-bottom:max(0.75rem,env(safe-area-inset-bottom))">
-      <button data-copy-debt class="press w-full rounded-xl bg-[var(--accent)] py-3 text-[14px] font-semibold text-[var(--on-accent)]">📋 Copy tin nhắc nợ</button>
+      <button data-copy-debt class="press w-full rounded-xl bg-[var(--accent)] py-3 text-[14px] font-semibold text-[var(--on-accent)]">
+        📋 Copy danh sách nhắc quỹ (${escapeHtml(activeDrive?.name || 'Quỹ lớp')})
+      </button>
     </footer>` : ''}`;
+
+  const driveSel = $('#driveSelect', el);
+  if (driveSel) {
+    driveSel.onchange = () => {
+      DB.activeDriveId = driveSel.value;
+      syncLegacyMirrorsFromActiveDrive();
+      if (!isGuestLocked()) saveDB();
+      renderMembersSheet();
+      if (currentView === 'home') render();
+    };
+  }
+
+  const newDriveBtn = $('#newDriveBtn', el);
+  if (newDriveBtn) {
+    newDriveBtn.onclick = () => {
+      if (!requirePinIfNeeded()) return;
+      const dName = prompt('Tên đợt thu / sự kiện mới (VD: Quỹ 20/11, Tiền đồng phục, Dã ngoại):');
+      if (!dName || !dName.trim()) return;
+      const dFeeRaw = prompt(`Mức thu mỗi bạn cho "${dName.trim()}" (đồng):`, '50000');
+      if (dFeeRaw === null) return;
+      const dFee = Math.max(0, Math.round(Number(dFeeRaw) || 0));
+      const newDrive = {
+        id: 'drive_' + uid(),
+        name: dName.trim(),
+        shortCode: buildDriveShortCode(dName.trim()),
+        amount: dFee,
+        createdAt: Date.now(),
+        paid: {},
+        pending: {}
+      };
+      DB.drives.push(newDrive);
+      DB.activeDriveId = newDrive.id;
+      syncLegacyMirrorsFromActiveDrive();
+      saveDB();
+      renderMembersSheet();
+      if (currentView === 'home' || currentView === 'reports') render();
+      toast(`Đã tạo đợt thu "${newDrive.name}" (${fmtMoney(dFee)})`, 'var(--income)');
+    };
+  }
+
+  const delDriveBtn = $('#delDriveBtn', el);
+  if (delDriveBtn && activeDrive && DB.drives.length > 1) {
+    delDriveBtn.onclick = () => {
+      if (!requirePinIfNeeded()) return;
+      if (!confirm(`Xoá đợt thu "${activeDrive.name}"?\n(Các giao dịch tiền đã ghi trong Sổ quỹ vẫn được giữ nguyên)`)) return;
+      DB.drives = DB.drives.filter(d => d.id !== activeDrive.id);
+      DB.activeDriveId = DB.drives[0].id;
+      syncLegacyMirrorsFromActiveDrive();
+      saveDB();
+      renderMembersSheet();
+      if (currentView === 'home' || currentView === 'reports') render();
+      toast(`Đã xoá đợt "${activeDrive.name}"`);
+    };
+  }
+
+  const quickFeeInp = $('#quickDriveFeeInp', el);
+  if (quickFeeInp && activeDrive) {
+    quickFeeInp.onchange = () => {
+      if (!requirePinIfNeeded()) return;
+      const val = Math.max(0, parseInt(quickFeeInp.value, 10) || 0);
+      activeDrive.amount = val;
+      syncLegacyMirrorsFromActiveDrive();
+      saveDB();
+      renderMembersSheet();
+      toast(`Đã cập nhật mức thu "${activeDrive.name}": ${fmtMoney(val)}`, 'var(--income)');
+    };
+  }
 
   $$('[data-member-tab]', el).forEach(btn => { btn.onclick = () => { memberFilterTab = btn.dataset.memberTab; renderMembersSheet(); }; });
 
   const rowsContainer = $('#memberRowsContainer', el);
   const searchInp = $('#memberSearchInp', el);
   if (rowsContainer) {
-    wireMemberRowEvents(rowsContainer);
+    wireMemberRowEvents(rowsContainer, activeDrive?.id);
     if (searchInp) {
       searchInp.oninput = () => {
-        rowsContainer.innerHTML = renderMemberRowsHtml(filteredMembers, searchInp.value);
-        wireMemberRowEvents(rowsContainer);
+        rowsContainer.innerHTML = renderMemberRowsHtml(filteredMembers, searchInp.value, activeDrive?.id);
+        wireMemberRowEvents(rowsContainer, activeDrive?.id);
       };
     }
-  }
-
-  const quickFeeInp = $('#quickTermFeeInp', el);
-  if (quickFeeInp) {
-    quickFeeInp.onchange = () => {
-      if (!requirePinIfNeeded()) return;
-      const val = Math.max(0, parseInt(quickFeeInp.value, 10) || 0);
-      DB.settings.termFee = val;
-      saveDB();
-      renderMembersSheet();
-      toast(`Đã cập nhật mức quỹ: ${fmtMoney(val)}`, 'var(--income)');
-    };
   }
 
   const addBtn = $('#addMemberBtn', el);
@@ -3046,10 +3627,9 @@ function renderMembersSheet() {
   if (importBtn) importBtn.onclick = importMembers;
   if (copyDebtBtn) {
     copyDebtBtn.onclick = () => {
-      const unpaid = DB.members.filter(m => !isMemberPaidToday(m.id)).map(m => m.name);
       if (DB.members.length === 0) { toast('Chưa có thành viên nào để nhắc'); return; }
-      if (unpaid.length === 0) { toast('Cả lớp đã đóng đủ 🎉', 'var(--income)'); return; }
-      const msg = `Chào cả lớp, hiện có ${unpaid.length} bạn chưa đóng quỹ (${fmtMoney(DB.settings.termFee)}/bạn): ${unpaid.join(', ')}. Các bạn sắp xếp đóng giúp mình nhé. Cảm ơn cả lớp`;
+      const msg = buildSmartRemindMessage(activeDrive);
+      if (!msg) { toast(`Cả lớp đã đóng đủ "${activeDrive?.name}" 🎉`, 'var(--income)'); return; }
       copyText(msg);
     };
   }
@@ -3091,7 +3671,7 @@ function importMembers() {
 }
 
 /* ============================================================
-   17. SHEET: INBOX
+   19. SHEET: INBOX
 ============================================================ */
 function openInboxSheet() { renderInboxSheet(); showSheet(); }
 
@@ -3121,7 +3701,7 @@ function renderInboxSheet() {
               <span class="text-[16px]">${catIcon(t.category)}</span>
               <div class="min-w-0 flex-1">
                 <p class="truncate text-[14px] font-medium">${escapeHtml(t.note || 'Chưa có ghi chú')}</p>
-                <p class="text-[12px] text-[var(--text-3)]">${formatDateVN(t.date)} · ${w === 'cash' ? '💵 Tiền mặt' : '🏦 Chuyển khoản'}</p>
+                <p class="text-[12px] text-[var(--text-3)]">${formatDateVN(t.date)} · ${w === 'cash' ? '💵 Tiền mặt' : '🏦 Chuyển khoản'}${t.member ? ` · 👤 ${escapeHtml(t.member)}` : ''}</p>
               </div>
               <span class="shrink-0 text-[15px] font-semibold tabular-nums ${t.type === 'in' ? 'text-[var(--income)]' : 'text-[var(--expense)]'}">
                 ${t.type === 'in' ? '+' : '−'}${fmt(t.amount)}
@@ -3160,7 +3740,7 @@ function renderInboxSheet() {
 }
 
 /* ============================================================
-   18. SHEET: SHOW/CLOSE
+   20. SHEET: SHOW/CLOSE
 ============================================================ */
 function showSheet() {
   const ov = $('#sheetOverlay');
@@ -3179,11 +3759,15 @@ function closeSheet() {
 $('#sheetBackdrop').onclick = () => { if (!isGuestLocked()) closeSheet(); };
 document.addEventListener('click', (e) => { if (e.target.closest('[data-sheet-close]') && !isGuestLocked()) closeSheet(); });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && $('#sheetOverlay').classList.contains('open') && !isGuestLocked()) closeSheet();
+  if (e.key === 'Escape') {
+    if (!$('#receiptModal').hidden) { $('#receiptModal').hidden = true; return; }
+    if (!$('#qrModal').hidden) { $('#qrModal').hidden = true; activeQrContext = null; return; }
+    if ($('#sheetOverlay').classList.contains('open') && !isGuestLocked()) closeSheet();
+  }
 });
 
 /* ============================================================
-   19. EXPORT EXCEL (.XLSX OFFLINE VIA SHEETJS) & CSV
+   21. EXPORT EXCEL (.XLSX OFFLINE VIA SHEETJS) & CSV
 ============================================================ */
 function exportExcel() {
   if (typeof window.XLSX === 'undefined') {
@@ -3195,25 +3779,28 @@ function exportExcel() {
   const wb = window.XLSX.utils.book_new();
 
   // Sheet 1: Sổ giao dịch
-  const txRows = [['Ngày', 'Loại', 'Ví', 'Danh mục', 'Số tiền (đ)', 'Người nộp', 'Ghi chú', 'Loại phiếu', 'Trạng thái']];
+  const txRows = [['Ngày', 'Loại', 'Ví', 'Danh mục', 'Đợt thu', 'Số tiền (đ)', 'Người nộp', 'Ghi chú', 'Hóa đơn', 'Loại phiếu', 'Trạng thái']];
   DB.transactions.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach(t => {
     const w = (t.wallet || t.account) === 'cash' ? 'Tiền mặt' : 'Chuyển khoản';
+    const dObj = t.driveId ? DB.drives.find(d => d.id === t.driveId) : null;
     txRows.push([
       t.date,
       t.type === 'in' ? 'Thu' : 'Chi',
       w,
       t.categoryName || '',
+      dObj ? dObj.name : '',
       Number(t.amount) || 0,
       t.member || '',
       t.note || '',
+      t.receipt ? 'Có ảnh đính kèm' : 'Không',
       (t.isAdjustment || t.category === 'adjust') ? 'Điều chỉnh kiểm kê' : 'Thường',
       t.status === 'draft' ? 'Nháp' : 'Đã ghi'
     ]);
   });
   const wsTx = window.XLSX.utils.aoa_to_sheet(txRows);
   wsTx['!cols'] = [
-    { wch: 12 }, { wch: 8 }, { wch: 15 }, { wch: 20 },
-    { wch: 15 }, { wch: 22 }, { wch: 36 }, { wch: 20 }, { wch: 12 }
+    { wch: 12 }, { wch: 8 }, { wch: 15 }, { wch: 18 }, { wch: 20 },
+    { wch: 15 }, { wch: 22 }, { wch: 36 }, { wch: 16 }, { wch: 20 }, { wch: 12 }
   ];
   window.XLSX.utils.book_append_sheet(wb, wsTx, 'So_Giao_Dich');
 
@@ -3229,20 +3816,22 @@ function exportExcel() {
   wsSum['!cols'] = [{ wch: 26 }, { wch: 18 }];
   window.XLSX.utils.book_append_sheet(wb, wsSum, 'Tong_Hop_Vi');
 
-  // Sheet 3: Danh sách thành viên
-  const memRows = [['Mã TV', 'Họ và tên', 'Trạng thái hôm nay', 'Thời gian đóng']];
+  // Sheet 3: Tình hình đóng quỹ theo từng Đợt thu
+  const memHeader = ['Mã TV', 'Họ và tên', ...DB.drives.map(d => `${d.name} (${fmtMoney(d.amount)})`)];
+  const memRows = [memHeader];
   DB.members.forEach(m => {
-    const paid = isMemberPaidToday(m.id);
-    memRows.push([
-      m.code || '',
-      m.name,
-      paid ? 'Đã đóng' : 'Chưa đóng',
-      paid ? getMemberPaidLabel(m.id) : ''
-    ]);
+    const row = [m.code || '', m.name];
+    DB.drives.forEach(d => {
+      const st = getMemberDriveStatus(m.id, d.id);
+      if (st.isFullyPaid) row.push(`Đã đóng (${fmtMoney(st.paidAmount)})`);
+      else if (st.isPartial) row.push(`Thiếu ${fmtMoney(st.remaining)}`);
+      else row.push(`Chưa đóng (${fmtMoney(st.remaining)})`);
+    });
+    memRows.push(row);
   });
   const wsMem = window.XLSX.utils.aoa_to_sheet(memRows);
-  wsMem['!cols'] = [{ wch: 10 }, { wch: 26 }, { wch: 18 }, { wch: 24 }];
-  window.XLSX.utils.book_append_sheet(wb, wsMem, 'Thanh_Vien');
+  wsMem['!cols'] = [{ wch: 10 }, { wch: 26 }, ...DB.drives.map(() => ({ wch: 24 }))];
+  window.XLSX.utils.book_append_sheet(wb, wsMem, 'Thu_Quy_Theo_Dot');
 
   window.XLSX.writeFile(wb, `SoQuyLop_${todayISO()}.xlsx`);
   toast('📊 Đã xuất file Excel (.xlsx) thành công!', 'var(--income)');
@@ -3275,7 +3864,7 @@ function exportCSV() {
 }
 
 /* ============================================================
-   20. VIEWS + INIT
+   22. VIEWS + INIT
 ============================================================ */
 const VIEWS = {
   home: renderHome, ledger: renderLedger, check: renderCheck,
@@ -3296,7 +3885,7 @@ function showAppShell() {
 function enterApp(user) {
   currentUser = user;
   DB = loadUserDB(user.username);
-  checkDailyMemberReset(true);
+  recomputeAllDrivesFromTransactions();
   balanceHidden = !!DB.settings.hideBalance;
   document.documentElement.dataset.theme = DB.settings.theme || 'giay-cu';
   saveSession(user);
@@ -3384,6 +3973,9 @@ function syncOnResume() {
   if (!navigator.onLine) {
     updateSyncBadge('offline');
     return;
+  }
+  if (isGuestLocked() && activeQrContext && activeQrContext.memberId) {
+    reportMemberTransfer(activeQrContext.memberId, activeQrContext.driveId, { silentToast: true });
   }
   if (isGuestLocked() || currentUser) {
     initRealtimeSync();
