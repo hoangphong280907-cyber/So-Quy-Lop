@@ -3049,7 +3049,7 @@ function renderMembersSheet() {
       const unpaid = DB.members.filter(m => !isMemberPaidToday(m.id)).map(m => m.name);
       if (DB.members.length === 0) { toast('Chưa có thành viên nào để nhắc'); return; }
       if (unpaid.length === 0) { toast('Cả lớp đã đóng đủ 🎉', 'var(--income)'); return; }
-      const msg = `Chào cả lớp, hiện có ${unpaid.length} bạn chưa đóng quỹ (${fmtMoney(DB.settings.termFee)}/bạn): ${unpaid.join(', ')}. Các bạn sắp xếp đóng giúp mình nhé. Cảm ơn cả lớp 🌿`;
+      const msg = `Chào cả lớp, hiện có ${unpaid.length} bạn chưa đóng quỹ (${fmtMoney(DB.settings.termFee)}/bạn): ${unpaid.join(', ')}. Các bạn sắp xếp đóng giúp mình nhé. Cảm ơn cả lớp`;
       copyText(msg);
     };
   }
