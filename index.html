@@ -513,24 +513,78 @@ function buildDriveShortCode(name) {
   return words.map(w => (/^\d+$/.test(w) ? w : w[0])).join('').slice(0, 10);
 }
 
-function ensureMemberCodes(list) {
-  if (!Array.isArray(list)) return [];
-  const used = new Set();
-  list.forEach((m) => {
-    if (m && m.code) used.add(String(m.code).toUpperCase());
-  });
-  let counter = 1;
-  return list.map((m) => {
-    if (!m) return m;
-    let code = m.code ? String(m.code).toUpperCase() : '';
-    if (!code) {
-      while (used.has(`TV${String(counter).padStart(2, '0')}`)) counter++;
-      code = `TV${String(counter).padStart(2, '0')}`;
-      used.add(code);
-      counter++;
+const VI_ALPHA_ORDER = [
+  'a','ă','â','b','c','d','đ','e','ê','g','h','i','k','l','m',
+  'n','o','ô','ơ','p','q','r','s','t','u','ư','v','x','y'
+];
+const VI_CHAR_RANK = (() => {
+  const map = new Map();
+  VI_ALPHA_ORDER.forEach((ch, idx) => map.set(ch, idx + 1));
+  return map;
+})();
+
+function normalizeViWord(word) {
+  const lower = String(word || '').trim().toLowerCase();
+  let key = '';
+  for (let i = 0; i < lower.length; i++) {
+    const ch = lower[i];
+    if (VI_CHAR_RANK.has(ch)) {
+      key += String.fromCharCode(65 + VI_CHAR_RANK.get(ch));
+      continue;
     }
-    return { ...m, code };
-  });
+    const base = ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (base === 'đ') key += String.fromCharCode(65 + VI_CHAR_RANK.get('đ'));
+    else if (VI_CHAR_RANK.has(base)) key += String.fromCharCode(65 + VI_CHAR_RANK.get(base));
+    else key += ch;
+  }
+  return key;
+}
+
+function getNameSortParts(fullName) {
+  const tokens = String(fullName || '').trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return { given: '', middle: '', family: '', raw: '' };
+  if (tokens.length === 1) {
+    return {
+      given: normalizeViWord(tokens[0]),
+      middle: '',
+      family: '',
+      raw: tokens[0].toLowerCase()
+    };
+  }
+  const family = normalizeViWord(tokens[0]);
+  const given = normalizeViWord(tokens[tokens.length - 1]);
+  const middle = tokens.slice(1, -1).map(normalizeViWord).join(' ');
+  return {
+    given,
+    middle,
+    family,
+    raw: tokens.join(' ').toLowerCase()
+  };
+}
+
+function compareVietnameseMembers(a, b) {
+  const pa = getNameSortParts(a?.name || '');
+  const pb = getNameSortParts(b?.name || '');
+  if (pa.given !== pb.given) return pa.given < pb.given ? -1 : 1;
+  if (pa.middle !== pb.middle) return pa.middle < pb.middle ? -1 : 1;
+  if (pa.family !== pb.family) return pa.family < pb.family ? -1 : 1;
+  return pa.raw.localeCompare(pb.raw, 'vi');
+}
+
+function sortAndReindexMembers(list) {
+  if (!Array.isArray(list)) return [];
+  const sorted = list
+    .filter(Boolean)
+    .slice()
+    .sort(compareVietnameseMembers);
+  return sorted.map((m, idx) => ({
+    ...m,
+    code: `TV${String(idx + 1).padStart(2, '0')}`
+  }));
+}
+
+function ensureMemberCodes(list) {
+  return sortAndReindexMembers(list);
 }
 
 function getActiveDrive() {
@@ -3357,7 +3411,7 @@ function wireMemberRowEvents(container, driveId) {
       const m = DB.members.find(x => x.id === id);
       if (!m) return;
       if (!confirm(`Xoá "${m.name}" khỏi danh sách lớp?`)) return;
-      DB.members = DB.members.filter(x => x.id !== id);
+      DB.members = sortAndReindexMembers(DB.members.filter(x => x.id !== id));
       DB.drives.forEach(d => {
         if (d.paid) delete d.paid[id];
         if (d.pending) delete d.pending[id];
@@ -3412,6 +3466,7 @@ function buildSmartRemindMessage(drive) {
 }
 
 function renderMembersSheet() {
+  DB.members = sortAndReindexMembers(DB.members);
   if (isGuestLocked()) memberFilterTab = 'all';
   const activeDrive = getActiveDrive();
   const stats = driveStats(activeDrive?.id);
@@ -3427,63 +3482,91 @@ function renderMembersSheet() {
   const el = $('#sheetContent');
   el.innerHTML = `
     <div class="flex justify-center pt-2.5 md:hidden"><span class="h-1.5 w-10 rounded-full bg-[var(--border)]"></span></div>
-    <header class="flex items-center justify-between px-5 pb-2 pt-3">
-      <div class="min-w-0 flex-1">
-        <h1 class="text-[18px] font-semibold">${isGuestLocked() ? 'Đóng quỹ lớp (VietQR)' : 'Thu quỹ theo Đợt / Sự kiện'}</h1>
-        <p class="text-[12px] text-[var(--text-3)]">
-          ${isGuestLocked()
-            ? 'Chọn đợt thu, bấm tên bạn để mở QR — hệ thống tự báo "Tôi đã CK"'
-            : 'Người đã báo CK tự lên đầu · Duyệt xong quay về thứ tự ban đầu'}
-        </p>
-      </div>
-      ${!isGuestLocked() ? `<button data-sheet-close class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--text-2)] hover:bg-[var(--surface-2)]">✕</button>` : ''}
-    </header>
 
-    <!-- THANH CHỌN & TẠO ĐỢT THU / SỰ KIỆN RIÊNG -->
-    <div class="mx-5 mb-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2.5 space-y-2">
-      <div class="flex items-center gap-1.5">
-        <select id="driveSelect" class="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-[13px] font-semibold outline-none">
-          ${DB.drives.map(d => `<option value="${escapeHtml(d.id)}" ${d.id === activeDrive?.id ? 'selected' : ''}>📌 ${escapeHtml(d.name)} (${fmtMoney(d.amount)})</option>`).join('')}
-        </select>
-        ${!isGuestLocked() ? `
-          <button type="button" id="newDriveBtn" class="press shrink-0 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--on-accent)]">+ Đợt mới</button>
-          ${DB.drives.length > 1 ? `<button type="button" id="delDriveBtn" aria-label="Xoá đợt thu" class="press shrink-0 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--warn)]">🗑️</button>` : ''}
-        ` : ''}
-      </div>
-
-      ${!isGuestLocked() && activeDrive ? `
-      <div class="flex items-center justify-between gap-2 text-[12px]">
-        <span class="text-[var(--text-2)]">Mức thu đợt này:</span>
-        <div class="flex items-center gap-1">
-          <input id="quickDriveFeeInp" type="number" min="0" step="5000" value="${Number(activeDrive.amount) || 0}"
-            class="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-right text-[12px] font-semibold tabular-nums outline-none" />
-          <span class="text-[var(--text-3)]">đ</span>
+    <!-- LỚP TRÊN CỐ ĐỊNH: TIÊU ĐỀ + ĐỢT THU + TAB LỌC + THÊM THÀNH VIÊN -->
+    <div class="shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-5 pb-3 pt-2 z-10">
+      <header class="flex items-center justify-between pb-2">
+        <div class="min-w-0 flex-1">
+          <h1 class="text-[18px] font-semibold">${isGuestLocked() ? 'Đóng quỹ lớp (VietQR)' : 'Thu quỹ theo Đợt / Sự kiện'}</h1>
+          <p class="text-[11.5px] text-[var(--text-3)]">
+            ${isGuestLocked()
+              ? 'Chọn đợt thu, bấm tên bạn để mở QR — hệ thống tự báo "Tôi đã CK"'
+              : 'Tự xếp Tên → Tên đệm → Họ · Đã CK lên đầu, duyệt xong về vị trí cũ'}
+          </p>
         </div>
+        ${!isGuestLocked() ? `<button data-sheet-close class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--text-2)] hover:bg-[var(--surface-2)]">✕</button>` : ''}
+      </header>
+
+      <!-- THANH CHỌN & TẠO ĐỢT THU / SỰ KIỆN RIÊNG -->
+      <div class="rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-2 space-y-1.5">
+        <div class="flex items-center gap-1.5">
+          <select id="driveSelect" class="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-[13px] font-semibold outline-none">
+            ${DB.drives.map(d => `<option value="${escapeHtml(d.id)}" ${d.id === activeDrive?.id ? 'selected' : ''}>📌 ${escapeHtml(d.name)} (${fmtMoney(d.amount)})</option>`).join('')}
+          </select>
+          ${!isGuestLocked() ? `
+            <button type="button" id="newDriveBtn" class="press shrink-0 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--on-accent)]">+ Đợt mới</button>
+            ${DB.drives.length > 1 ? `<button type="button" id="delDriveBtn" aria-label="Xoá đợt thu" class="press shrink-0 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--warn)]">🗑️</button>` : ''}
+          ` : ''}
+        </div>
+
+        ${!isGuestLocked() && activeDrive ? `
+        <div class="flex items-center justify-between gap-2 text-[12px]">
+          <span class="text-[var(--text-2)]">Mức thu đợt này:</span>
+          <div class="flex items-center gap-1">
+            <input id="quickDriveFeeInp" type="number" min="0" step="5000" value="${Number(activeDrive.amount) || 0}"
+              class="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-right text-[12px] font-semibold tabular-nums outline-none" />
+            <span class="text-[var(--text-3)]">đ</span>
+          </div>
+        </div>` : ''}
+      </div>
+
+      ${!isGuestLocked() && stats.total > 0 ? `
+      <div class="mt-2 flex items-center gap-2 rounded-xl bg-[var(--surface-2)] px-2.5 py-1.5">
+        <div class="flex-1 text-center"><p class="text-[15px] font-bold text-[var(--income)] tabular-nums">${stats.paid}/${stats.total}</p><p class="text-[10.5px] text-[var(--text-3)]">Đã đóng đủ</p></div>
+        <div class="h-6 w-px bg-[var(--border)]"></div>
+        <div class="flex-1 text-center"><p class="text-[15px] font-bold text-[var(--warn)] tabular-nums">${stats.unpaid}</p><p class="text-[10.5px] text-[var(--text-3)]">Chưa xong</p></div>
+        <div class="h-6 w-px bg-[var(--border)]"></div>
+        <div class="flex-1 text-center"><p class="text-[14px] font-bold text-[var(--income)] tabular-nums">${fmtMoney(stats.collected)}</p><p class="text-[10.5px] text-[var(--text-3)]">Đã thu đợt này</p></div>
+      </div>` : ''}
+
+      ${!isGuestLocked() ? `
+      <div class="mt-2 flex gap-1 overflow-x-auto pb-0.5">
+        ${[
+          { id: 'all', label: `Tất cả (${stats.total})` },
+          { id: 'unpaid', label: `Chưa đóng (${stats.unpaid})` },
+          { id: 'paid', label: `Đã đóng (${stats.paid})` },
+          { id: 'logs', label: `Lịch sử nộp (${logs.length})` }
+        ].map(tab => `
+          <button data-member-tab="${tab.id}" class="press shrink-0 rounded-lg px-2.5 py-1.5 text-[11.5px] font-medium
+            ${memberFilterTab === tab.id ? 'bg-[var(--accent)] text-[var(--on-accent)]' : 'bg-[var(--surface-2)] text-[var(--text-2)]'}">
+            ${tab.label}
+          </button>`).join('')}
+      </div>
+
+      <div class="mt-2 flex gap-2">
+        <input id="newMemberName" type="text" placeholder="Tên thành viên mới" maxlength="40"
+          class="min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[13.5px] outline-none placeholder:text-[var(--text-3)]" />
+        <button id="addMemberBtn" class="press shrink-0 rounded-xl bg-[var(--accent)] px-3.5 py-2 text-[13px] font-semibold text-[var(--on-accent)]">Thêm</button>
+      </div>
+      <button data-import-members class="mt-1.5 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] py-1.5 text-[11.5px] font-medium text-[var(--text-2)]">
+        📋 Dán danh sách (mỗi dòng một tên)
+      </button>` : ''}
+
+      ${memberFilterTab !== 'logs' && DB.members.length > 0 ? `
+      <div class="mt-2">
+        <input id="memberSearchInp" type="text" placeholder="🔍 Tìm nhanh tên hoặc mã (VD: Phong, TV01)..."
+          class="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-[12.5px] outline-none placeholder:text-[var(--text-3)]" />
+      </div>` : ''}
+
+      ${!isGuestLocked() && stats.pending > 0 ? `
+      <div class="mt-2 flex items-center justify-between rounded-xl border border-[var(--expense)] bg-[var(--draft-bg)] px-3 py-1.5 text-[11.5px]">
+        <span class="font-medium text-[var(--expense)]">💸 Có ${stats.pending} bạn đã báo CK (đã đưa lên đầu)</span>
+        <span class="text-[11px] text-[var(--text-3)]">Bấm Duyệt CK ✓</span>
       </div>` : ''}
     </div>
 
-    ${!isGuestLocked() && stats.total > 0 ? `
-    <div class="mx-5 flex items-center gap-2 rounded-xl bg-[var(--surface-2)] p-2.5">
-      <div class="flex-1 text-center"><p class="text-[18px] font-bold text-[var(--income)] tabular-nums">${stats.paid}/${stats.total}</p><p class="text-[11px] text-[var(--text-3)]">Đã đóng đủ</p></div>
-      <div class="h-8 w-px bg-[var(--border)]"></div>
-      <div class="flex-1 text-center"><p class="text-[18px] font-bold text-[var(--warn)] tabular-nums">${stats.unpaid}</p><p class="text-[11px] text-[var(--text-3)]">Chưa xong</p></div>
-      <div class="h-8 w-px bg-[var(--border)]"></div>
-      <div class="flex-1 text-center"><p class="text-[15px] font-bold text-[var(--income)] tabular-nums">${fmtMoney(stats.collected)}</p><p class="text-[11px] text-[var(--text-3)]">Đã thu đợt này</p></div>
-    </div>` : ''}
-
-    ${memberFilterTab !== 'logs' && DB.members.length > 0 ? `
-    <div class="mx-5 mt-2">
-      <input id="memberSearchInp" type="text" placeholder="🔍 Tìm nhanh tên hoặc mã (VD: Phong, TV01)..."
-        class="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[13px] outline-none placeholder:text-[var(--text-3)]" />
-    </div>` : ''}
-
-    ${!isGuestLocked() && stats.pending > 0 ? `
-    <div class="mx-5 mt-2 flex items-center justify-between rounded-xl border border-[var(--expense)] bg-[var(--draft-bg)] px-3.5 py-2 text-[12px]">
-      <span class="font-medium text-[var(--expense)]">💸 Có ${stats.pending} bạn đã báo CK (đã đưa lên đầu)</span>
-      <span class="text-[11px] text-[var(--text-3)]">Bấm Duyệt CK ✓</span>
-    </div>` : ''}
-
-    <div id="memberListScroll" class="scroll-y flex-1 overflow-y-auto px-5 pb-3 pt-2">
+    <!-- LỚP DƯỚI CUỘN ĐỘC LẬP: DANH SÁCH THÀNH VIÊN / LỊCH SỬ -->
+    <div id="memberListScroll" class="scroll-y flex-1 overflow-y-auto px-5 pb-4 pt-2">
       ${memberFilterTab === 'logs'
         ? (logs.length === 0
             ? `<div class="py-10 text-center text-[13px] text-[var(--text-3)]">Chưa có lịch sử nộp quỹ trong đợt này</div>`
@@ -3501,38 +3584,14 @@ function renderMembersSheet() {
             ? `<div class="py-8 text-center">
                 <p class="text-3xl mb-2">👥</p>
                 <p class="text-[14px] font-medium">Chưa có thành viên nào</p>
-                <p class="mt-1 text-[12px] text-[var(--text-3)]">Thêm tên bên dưới hoặc dán danh sách lớp vào</p>
+                <p class="mt-1 text-[12px] text-[var(--text-3)]">Thêm tên ở khung trên hoặc dán danh sách lớp vào</p>
               </div>`
             : `<div id="memberRowsContainer">${renderMemberRowsHtml(filteredMembers, '', activeDrive?.id)}</div>`)}
-
-      ${!isGuestLocked() ? `
-      <div class="mt-3 flex gap-1.5 overflow-x-auto pb-1">
-        ${[
-          { id: 'all', label: `Tất cả (${stats.total})` },
-          { id: 'unpaid', label: `Chưa đóng (${stats.unpaid})` },
-          { id: 'paid', label: `Đã đóng (${stats.paid})` },
-          { id: 'logs', label: `Lịch sử (${logs.length})` }
-        ].map(tab => `
-          <button data-member-tab="${tab.id}" class="press shrink-0 rounded-lg px-2.5 py-1.5 text-[12px] font-medium
-            ${memberFilterTab === tab.id ? 'bg-[var(--accent)] text-[var(--on-accent)]' : 'bg-[var(--surface-2)] text-[var(--text-2)]'}">
-            ${tab.label}
-          </button>`).join('')}
-      </div>` : ''}
-
-      ${!isGuestLocked() ? `
-      <div class="mt-4 flex gap-2">
-        <input id="newMemberName" type="text" placeholder="Tên thành viên mới" maxlength="40"
-          class="flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[14px] outline-none placeholder:text-[var(--text-3)]" />
-        <button id="addMemberBtn" class="press rounded-xl bg-[var(--accent)] px-4 py-2.5 text-[13px] font-semibold text-[var(--on-accent)]">Thêm</button>
-      </div>
-      <button data-import-members class="mt-2 w-full rounded-xl border border-[var(--border)] py-2 text-[12px] text-[var(--text-2)]">
-        📋 Dán danh sách lớp (mỗi dòng một tên)
-      </button>` : ''}
     </div>
 
     ${!isGuestLocked() ? `
-    <footer class="border-t border-[var(--border)] px-5 py-3" style="padding-bottom:max(0.75rem,env(safe-area-inset-bottom))">
-      <button data-copy-debt class="press w-full rounded-xl bg-[var(--accent)] py-3 text-[14px] font-semibold text-[var(--on-accent)]">
+    <footer class="shrink-0 border-t border-[var(--border)] bg-[var(--surface)] px-5 py-3 z-10" style="padding-bottom:max(0.75rem,env(safe-area-inset-bottom))">
+      <button data-copy-debt class="press w-full rounded-xl bg-[var(--accent)] py-2.5 text-[13.5px] font-semibold text-[var(--on-accent)]">
         📋 Copy danh sách nhắc quỹ (${escapeHtml(activeDrive?.name || 'Quỹ lớp')})
       </button>
     </footer>` : ''}`;
@@ -3643,13 +3702,13 @@ function addMemberFromInput() {
   if (DB.members.some(m => m.name.toLowerCase() === name.toLowerCase())) {
     toast('Tên này đã có trong danh sách'); return;
   }
-  const nextCode = `TV${String(DB.members.length + 1).padStart(2, '0')}`;
-  DB.members.push({ id: uid(), code: nextCode, name });
+  DB.members.push({ id: uid(), code: '', name });
+  DB.members = sortAndReindexMembers(DB.members);
   saveDB(); inp.value = '';
   renderMembersSheet();
   if (currentView === 'home') render();
   setTimeout(() => $('#newMemberName')?.focus(), 50);
-  toast(`Đã thêm "${name}"`, 'var(--income)');
+  toast(`Đã thêm "${name}" & cập nhật số báo danh`, 'var(--income)');
 }
 
 function importMembers() {
@@ -3661,13 +3720,13 @@ function importMembers() {
   let added = 0, skipped = 0;
   for (const name of names) {
     if (DB.members.some(m => m.name.toLowerCase() === name.toLowerCase())) { skipped++; continue; }
-    const nextCode = `TV${String(DB.members.length + 1).padStart(2, '0')}`;
-    DB.members.push({ id: uid(), code: nextCode, name });
+    DB.members.push({ id: uid(), code: '', name });
     added++;
   }
+  DB.members = sortAndReindexMembers(DB.members);
   saveDB(); renderMembersSheet();
   if (currentView === 'home') render();
-  toast(`Đã thêm ${added} thành viên${skipped ? `, bỏ qua ${skipped} trùng` : ''}`, 'var(--income)');
+  toast(`Đã thêm ${added} thành viên${skipped ? `, bỏ qua ${skipped} trùng` : ''} & xếp lại SBD`, 'var(--income)');
 }
 
 /* ============================================================
