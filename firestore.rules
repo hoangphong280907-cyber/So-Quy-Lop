@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read: if true;
+      allow write: if request.auth != null
+                   && request.auth.uid == "DAN_UID_TAI_KHOAN_THU_QUY_VAO_DAY";
+    }
+  }
+}

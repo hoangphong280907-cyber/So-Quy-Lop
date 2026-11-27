@@ -11,8 +11,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2921/2921222.png">
 <script src="https://cdn.tailwindcss.com"></script>
+<!-- SheetJS (đã precache trong sw.js để xuất Excel khi Offline) -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <!-- Firebase Compat SDK cho Single-File HTML -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <style>
   [data-theme="giay-cu"]   { --bg:#F5F0E8; --surface:#FDFBF7; --surface-2:#EFE9DE; --border:#E3DCCF;
@@ -136,7 +139,7 @@
     </div>
 
     <p class="mt-4 px-2 text-center text-[11px] leading-relaxed text-[var(--text-3)]">
-      Hỗ trợ lưu cục bộ, sao lưu JSON và đồng bộ Realtime qua Firebase Firestore.
+      Hỗ trợ lưu cục bộ Offline, xuất Excel (.xlsx), sao lưu JSON và đồng bộ Realtime qua Firebase Firestore.
     </p>
   </div>
 </div>
@@ -186,7 +189,7 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
 /* ============================================================
-   1. SERVICE WORKER + FIREBASE REALTIME + VIETQR CONFIG
+   1. SERVICE WORKER + FIREBASE REALTIME & AUTH + SYNC BADGE
 ============================================================ */
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => {
@@ -217,24 +220,82 @@ const BANK_OPTIONS = [
 ];
 
 let firestoreDb = null;
+let firebaseAuth = null;
+let firebaseAuthUser = null;
 let firestoreUnsub = null;
 let isAdminUnlocked = sessionStorage.getItem('sq_pin_ok') === '1';
 let isApplyingRemoteSnapshot = false;
 let isPublicGuestMode = false;
+let syncBadgeState = navigator.onLine ? 'synced' : 'offline';
 
 const DEFAULT_SHARED_ROOM = 'lop_chinh';
 
 function getRoomId() {
-  return DEFAULT_SHARED_ROOM;
+  const paramRoom = new URLSearchParams(location.search).get('room');
+  return (paramRoom && paramRoom.trim()) ? paramRoom.trim() : DEFAULT_SHARED_ROOM;
 }
 
 function isViewOnlyMode() {
   return new URLSearchParams(location.search).get('view') === '1';
 }
 
+function getSyncBadgeMeta(state) {
+  if (!navigator.onLine || state === 'offline') {
+    return {
+      text: '🔴 Offline (Lưu tạm trên máy)',
+      bg: '#FBF0EE',
+      color: '#B56A5E',
+      border: '#E6C5BF'
+    };
+  }
+  if (state === 'syncing') {
+    return {
+      text: '🟡 Đang đồng bộ...',
+      bg: '#FBF6EC',
+      color: '#B07438',
+      border: '#E7D5B8'
+    };
+  }
+  return {
+    text: '🟢 Đã đồng bộ',
+    bg: 'var(--accent-soft)',
+    color: 'var(--income)',
+    border: 'var(--border)'
+  };
+}
+
+function updateSyncBadge(state) {
+  if (!navigator.onLine) state = 'offline';
+  syncBadgeState = state || 'synced';
+  const badge = $('#syncBadge');
+  if (!badge) return;
+  const meta = getSyncBadgeMeta(syncBadgeState);
+  badge.textContent = meta.text;
+  badge.style.backgroundColor = meta.bg;
+  badge.style.color = meta.color;
+  badge.style.borderColor = meta.border;
+}
+
+window.addEventListener('online', () => {
+  updateSyncBadge('syncing');
+  if (firestoreDb && (currentUser || isPublicGuestMode)) {
+    initRealtimeSync();
+  }
+});
+window.addEventListener('offline', () => {
+  updateSyncBadge('offline');
+});
+
 function ensureFirestoreInstance() {
   if (!FIREBASE_CONFIG.apiKey || !FIREBASE_CONFIG.projectId) return null;
   if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+  if (!firebaseAuth && typeof firebase.auth === 'function') {
+    firebaseAuth = firebase.auth();
+    firebaseAuth.onAuthStateChanged((u) => {
+      firebaseAuthUser = u || null;
+      if (currentView === 'settings') render();
+    });
+  }
   if (!firestoreDb) {
     firestoreDb = firebase.firestore();
     firestoreDb.enablePersistence({ synchronizeTabs: true }).catch(() => {});
@@ -244,12 +305,21 @@ function ensureFirestoreInstance() {
 
 function initRealtimeSync() {
   if (firestoreUnsub) { firestoreUnsub(); firestoreUnsub = null; }
+  if (!navigator.onLine) updateSyncBadge('offline');
   try {
     const dbInst = ensureFirestoreInstance();
     if (!dbInst) return;
 
     const roomId = getRoomId();
-    firestoreUnsub = dbInst.collection('so_quy_rooms').doc(roomId).onSnapshot((snap) => {
+    firestoreUnsub = dbInst.collection('so_quy_rooms').doc(roomId).onSnapshot({ includeMetadataChanges: true }, (snap) => {
+      if (!navigator.onLine) {
+        updateSyncBadge('offline');
+      } else if (snap.metadata && snap.metadata.hasPendingWrites) {
+        updateSyncBadge('syncing');
+      } else {
+        updateSyncBadge('synced');
+      }
+
       if (!snap.exists) return;
       const remote = snap.data();
       if (!remote || !remote.db) return;
@@ -260,7 +330,7 @@ function initRealtimeSync() {
       DB = normalizeDB(remote.db);
       DB._updatedAt = remote.updatedAt || Date.now();
       checkDailyMemberReset(false);
-      if (currentUser) {
+      if (currentUser && !isPublicGuestMode) {
         safeStorage.setItem(userDBKey(currentUser.username), JSON.stringify(DB));
       }
       balanceHidden = !!DB.settings.hideBalance;
@@ -281,7 +351,10 @@ function initRealtimeSync() {
         }
       }
       isApplyingRemoteSnapshot = false;
-    }, (err) => console.warn('Firestore sync:', err));
+    }, (err) => {
+      console.warn('Firestore sync:', err);
+      if (!navigator.onLine) updateSyncBadge('offline');
+    });
   } catch (e) {
     isApplyingRemoteSnapshot = false;
     console.warn('Firebase init skipped:', e);
@@ -299,14 +372,36 @@ function pushCloudDB(forceAllow = false) {
   try {
     const dbInst = ensureFirestoreInstance();
     if (!dbInst) return;
+    updateSyncBadge(navigator.onLine ? 'syncing' : 'offline');
     const roomId = getRoomId();
     dbInst.collection('so_quy_rooms').doc(roomId).set({
       db: DB,
       updatedAt: DB._updatedAt || Date.now(),
       owner: currentUser ? currentUser.username : (DB._owner || 'public_room')
-    }, { merge: true }).catch(() => {});
+    }, { merge: true }).then(() => {
+      if (navigator.onLine) updateSyncBadge('synced');
+    }).catch((err) => {
+      console.error('Firestore write error:', err);
+      if (err && (err.code === 'permission-denied' || String(err).includes('PERMISSION_DENIED'))) {
+        toast('🔒 PERMISSION_DENIED: Chỉ tài khoản Thủ quỹ mới có quyền ghi dữ liệu!', 'var(--warn)');
+      }
+      if (!navigator.onLine) updateSyncBadge('offline');
+    });
   } catch (e) {}
 }
+
+// Helper kiểm thử bảo mật & đồng bộ từ DevTools (F12)
+window.SoQuyCloud = {
+  getFirestore: () => ensureFirestoreInstance(),
+  getAuth: () => { ensureFirestoreInstance(); return firebaseAuth; },
+  testWriteAsGuest: () => {
+    const dbInst = ensureFirestoreInstance();
+    if (!dbInst) return Promise.reject('Firestore chưa khởi tạo');
+    return dbInst.collection('so_quy_rooms').doc(getRoomId()).set({
+      tamperTest: Date.now()
+    }, { merge: true });
+  }
+};
 
 function enterPublicGuestView() {
   isPublicGuestMode = true;
@@ -351,11 +446,11 @@ function stripVietnamese(str) {
 function ensureMemberCodes(list) {
   if (!Array.isArray(list)) return [];
   const used = new Set();
-  list.forEach((m, idx) => {
+  list.forEach((m) => {
     if (m && m.code) used.add(String(m.code).toUpperCase());
   });
   let counter = 1;
-  return list.map((m, idx) => {
+  return list.map((m) => {
     if (!m) return m;
     let code = m.code ? String(m.code).toUpperCase() : '';
     if (!code) {
@@ -419,8 +514,6 @@ function checkDailyMemberReset(shouldSave = true) {
   if (DB.settings.dailyResetMembers === false) return false;
   if (DB.lastMemberResetDate !== today) {
     DB.lastMemberResetDate = today;
-    // Reset những bạn đã đóng ở ngày trước về chưa đóng trong ngày mới
-    // Lịch sử đóng quỹ (paymentLogs) và giao dịch tài khoản vẫn giữ nguyên
     DB.memberPaid = {};
     if (shouldSave) saveDB();
     return true;
@@ -481,7 +574,6 @@ function setMemberPaidStatus(memberId, shouldPay, options = {}) {
     };
     delete DB.memberPending[memberId];
 
-    // Lưu vào lịch sử đóng quỹ (không bị mất khi qua ngày mới)
     const logId = `log_${today}_${memberId}`;
     const logIdx = DB.paymentLogs.findIndex(x => x.id === logId);
     const logEntry = {
@@ -505,6 +597,7 @@ function setMemberPaidStatus(memberId, shouldPay, options = {}) {
         amount: fee,
         category: 'quy',
         categoryName: 'Quỹ lớp',
+        wallet: 'bank',
         account: 'bank',
         date: today,
         member: m.name,
@@ -694,10 +787,10 @@ function toast(msg, color) {
   el.textContent = msg;
   el.style.cssText = `position:fixed;left:50%;bottom:7rem;transform:translateX(-50%);z-index:80;
     padding:8px 16px;border-radius:9999px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.15);
-    transition:opacity .2s;background:${color || 'var(--text)'};color:var(--bg);`;
+    transition:opacity .2s;background:${color || 'var(--text)'};color:var(--bg);max-width:92vw;text-align:center;`;
   el.style.opacity = '1';
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 2200);
+  toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 2600);
 }
 
 function copyText(text) {
@@ -779,7 +872,7 @@ function userDBKey(username) { return DB_KEY_PREFIX + username.toLowerCase(); }
 let currentUser = null;
 
 /* ============================================================
-   4. DB + BACKUP / RESTORE JSON
+   4. DB + BACKUP / RESTORE JSON (CỤM 4)
 ============================================================ */
 function emptyDB() {
   return {
@@ -807,7 +900,19 @@ function emptyDB() {
 function normalizeDB(parsed) {
   const base = emptyDB();
   const out = Object.assign(base, parsed || {});
-  out.transactions = Array.isArray(out.transactions) ? out.transactions : [];
+  out.transactions = Array.isArray(out.transactions)
+    ? out.transactions.map(t => {
+        const w = (t && (t.wallet || t.account)) || 'cash';
+        return {
+          ...t,
+          wallet: w,
+          account: w,
+          status: t.status || 'done',
+          date: t.date || todayISO(),
+          categoryName: t.categoryName || t.category || 'Khác'
+        };
+      })
+    : [];
   out.cashChecks = Array.isArray(out.cashChecks) ? out.cashChecks : [];
   out.members = ensureMemberCodes(Array.isArray(out.members) ? out.members : []);
   out.memberPaid = out.memberPaid && typeof out.memberPaid === 'object' ? out.memberPaid : {};
@@ -841,20 +946,27 @@ function saveDB() {
   }
 }
 
-function exportBackupJSON() {
-  if (!DB) return;
-  const payload = {
-    app: 'so-quy-lop',
-    version: 2,
+// 1. Xuất toàn bộ dữ liệu ra file .json
+function exportJSONBackup(appState = DB) {
+  if (!appState) return;
+  const backupPayload = {
+    app: 'SoQuyLop',
+    version: '1.0',
     exportedAt: new Date().toISOString(),
-    owner: currentUser?.username || '',
-    data: DB
+    data: {
+      ...appState,
+      members: appState.members || [],
+      transactions: appState.transactions || [],
+      settings: appState.settings || {}
+    }
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+
+  const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
+  const dateStr = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `so-quy-backup-${todayISO()}.json`;
+  a.download = `SoQuyLop_Backup_${dateStr}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -862,34 +974,55 @@ function exportBackupJSON() {
   toast('Đã xuất file sao lưu (.json)', 'var(--income)');
 }
 
-function handleRestoreFile(file) {
+// 2. Đọc và kiểm tra file .json trước khi khôi phục
+function handleRestoreJSON(fileInputEvent, onConfirmRestore) {
+  const file = fileInputEvent?.target?.files?.[0];
   if (!file) return;
-  if (!requirePinIfNeeded()) return;
+  if (!requirePinIfNeeded()) {
+    fileInputEvent.target.value = '';
+    return;
+  }
+
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
-      const json = JSON.parse(e.target.result);
-      const rawDb = json && json.data && typeof json.data === 'object' ? json.data : json;
-      if (!rawDb || typeof rawDb !== 'object' || (!Array.isArray(rawDb.transactions) && !Array.isArray(rawDb.members))) {
-        toast('File JSON không đúng định dạng Sổ Quỹ', 'var(--warn)');
+      const parsed = JSON.parse(e.target.result);
+      const isValidApp = parsed && (parsed.app === 'SoQuyLop' || parsed.app === 'so-quy-lop');
+      if (!isValidApp || !parsed.data || !Array.isArray(parsed.data.transactions)) {
+        alert('File không đúng định dạng sao lưu của Sổ Quỹ Lớp!');
         return;
       }
-      if (!confirm('Khôi phục dữ liệu từ file JSON sẽ ghi đè dữ liệu hiện tại. Tiếp tục?')) return;
-      DB = normalizeDB(rawDb);
-      balanceHidden = !!DB.settings.hideBalance;
-      document.documentElement.dataset.theme = DB.settings.theme || 'giay-cu';
-      saveDB();
-      render();
-      toast('Đã khôi phục dữ liệu từ file JSON', 'var(--income)');
+      const membersArr = Array.isArray(parsed.data.members) ? parsed.data.members : [];
+      const exportedDateStr = parsed.exportedAt
+        ? new Date(parsed.exportedAt).toLocaleString('vi-VN')
+        : 'không rõ thời gian';
+      const msg = `Khôi phục bản sao lưu ngày ${exportedDateStr}?\n`
+                + `- Thành viên: ${membersArr.length}\n`
+                + `- Giao dịch: ${parsed.data.transactions.length}\n`
+                + `(Dữ liệu hiện tại sẽ được thay thế)`;
+      if (confirm(msg)) {
+        if (typeof onConfirmRestore === 'function') {
+          onConfirmRestore(parsed.data);
+        } else {
+          DB = normalizeDB(parsed.data);
+          balanceHidden = !!DB.settings.hideBalance;
+          document.documentElement.dataset.theme = DB.settings.theme || 'giay-cu';
+          saveDB();
+          render();
+          toast('Đã khôi phục nguyên trạng từ file JSON', 'var(--income)');
+        }
+      }
     } catch (err) {
-      toast('Không đọc được file JSON', 'var(--warn)');
+      alert('Lỗi đọc file JSON: File bị hỏng hoặc sai cú pháp.');
+    } finally {
+      fileInputEvent.target.value = '';
     }
   };
   reader.readAsText(file);
 }
 
 /* ============================================================
-   5. CATEGORIES & COMPUTATIONS
+   5. CATEGORIES & COMPUTATIONS (TÁCH VÍ TIỀN MẶT & CHUYỂN KHOẢN)
 ============================================================ */
 const CATEGORIES = {
   in: [
@@ -909,8 +1042,12 @@ const CATEGORIES = {
     { id:'khac-out',  icon:'✨', name:'Khác' },
   ],
 };
-function getCategory(type, id) { return id ? (CATEGORIES[type] || []).find(c => c.id === id) || null : null; }
+function getCategory(type, id) {
+  if (id === 'adjust') return { id: 'adjust', icon: '⚖️', name: 'Điều chỉnh kiểm kê' };
+  return id ? (CATEGORIES[type] || []).find(c => c.id === id) || null : null;
+}
 function catIcon(catId) {
+  if (catId === 'adjust' || catId === 'Điều chỉnh kiểm kê') return '⚖️';
   for (const list of Object.values(CATEGORIES)) {
     const c = list.find(x => x.id === catId);
     if (c) return c.icon;
@@ -919,12 +1056,37 @@ function catIcon(catId) {
 }
 const DENOMS = [500000, 200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000];
 
+// Hàm tạo phiếu điều chỉnh khi kiểm đếm bị lệch (Cụm 1)
+function createReconcileTransaction(wallet, bookBalance, actualBalance, reason) {
+  const diff = actualBalance - bookBalance;
+  if (diff === 0) return null;
+  const walletLabel = wallet === 'cash' ? 'Tiền mặt' : 'Chuyển khoản';
+
+  return {
+    id: 'adj_' + Date.now() + '_' + wallet,
+    type: diff > 0 ? 'in' : 'out',      // Thừa tiền -> ghi tăng; Thiếu tiền -> ghi giảm
+    isAdjustment: true,                 // Đánh dấu phiếu điều chỉnh kiểm kê
+    wallet: wallet,                     // 'cash' hoặc 'bank'
+    account: wallet,                    // Giữ tương thích hiển thị sổ quỹ
+    category: 'adjust',
+    categoryName: 'Điều chỉnh kiểm kê',
+    amount: Math.abs(diff),
+    date: todayISO(),
+    member: '',
+    note: `[Lệch ${walletLabel} ${diff > 0 ? '+' : ''}${diff.toLocaleString('vi-VN')}đ] ${reason.trim()}`,
+    receipt: null,
+    status: 'done',
+    createdAt: Date.now()
+  };
+}
+
 function balance() {
   const done = DB.transactions.filter(t => t.status === 'done');
   let cash = 0, bank = 0;
   for (const t of done) {
+    const w = t.wallet || t.account || 'cash';
     const v = t.type === 'in' ? t.amount : -t.amount;
-    if (t.account === 'cash') cash += v; else bank += v;
+    if (w === 'cash') cash += v; else bank += v;
   }
   return { cash, bank, total: cash + bank };
 }
@@ -991,18 +1153,25 @@ let balanceHidden = false;
 
 function renderAppbar() {
   const title = VIEW_TITLES[currentView];
-  const syncBadge = firestoreDb ? ' · ☁️ Realtime' : '';
+  const badgeMeta = getSyncBadgeMeta(navigator.onLine ? syncBadgeState : 'offline');
   const sub = currentView === 'home'
-    ? `🌿 Chào ${escapeHtml(currentUser.username)} · ${VI_DAYS[new Date().getDay()]}, ${formatDateVN(todayISO())}${syncBadge}`
+    ? `🌿 Chào ${escapeHtml(currentUser.username)} · ${VI_DAYS[new Date().getDay()]}, ${formatDateVN(todayISO())}`
     : '';
   $('#appbar').innerHTML = `
-    <div class="mx-auto flex max-w-[1080px] items-center justify-between px-4 py-2.5">
-      <div class="min-w-0">
-        <h1 class="text-[17px] font-semibold leading-tight">${title}</h1>
-        ${sub ? `<p class="text-[12px] text-[var(--text-3)] truncate">${sub}</p>` : ''}
+    <div class="mx-auto flex max-w-[1080px] items-center justify-between gap-2 px-4 py-2.5">
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-2">
+          <h1 class="text-[17px] font-semibold leading-tight">${title}</h1>
+          <span id="syncBadge"
+            style="background-color:${badgeMeta.bg};color:${badgeMeta.color};border-color:${badgeMeta.border}"
+            class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap">
+            ${badgeMeta.text}
+          </span>
+        </div>
+        ${sub ? `<p class="mt-0.5 text-[12px] text-[var(--text-3)] truncate">${sub}</p>` : ''}
       </div>
       <button id="themeBtn" aria-label="Đổi giao diện"
-        class="flex h-11 w-11 items-center justify-center rounded-xl text-lg text-[var(--text-2)] hover:bg-[var(--surface-2)]">🎨</button>
+        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg text-[var(--text-2)] hover:bg-[var(--surface-2)]">🎨</button>
     </div>
     <div id="themeMenu" class="card absolute right-3 top-[60px] z-40 hidden w-56 p-2"></div>`;
   renderThemeMenu();
@@ -1110,7 +1279,7 @@ function renderHome() {
   const reminders = [];
   if (todayCheck) {
     reminders.push(`<li class="flex items-center gap-3 py-2.5 text-[15px] text-[var(--income)]">
-      <span class="text-lg">✅</span><span class="flex-1">Đã kiểm đếm hôm nay</span></li>`);
+      <span class="text-lg">✅</span><span class="flex-1">Đã kiểm đếm 2 ví hôm nay</span></li>`);
   } else {
     reminders.push(`<li><button data-act="go-check" class="press flex w-full items-center gap-3 py-2.5 text-left text-[15px]">
       <span class="text-lg">🌿</span><span class="flex-1">Kiểm đếm lúc ${escapeHtml(DB.settings.notifTime)}</span>
@@ -1150,11 +1319,11 @@ function renderHome() {
       ${bal.total < 0 ? `<p class="text-[12px] text-[var(--warn)]">⚠️ Quỹ đang âm</p>` : ''}
       <div class="my-3 h-px bg-[var(--border)]"></div>
       <div class="flex items-center justify-between text-[15px]">
-        <span class="text-[var(--text-2)]">💵 Tiền mặt</span>
+        <span class="text-[var(--text-2)]">💵 Ví Tiền mặt</span>
         <span class="font-semibold tabular-nums">${disp(bal.cash)}</span>
       </div>
       <div class="mt-2 flex items-center justify-between text-[15px]">
-        <span class="text-[var(--text-2)]">🏦 Tài khoản</span>
+        <span class="text-[var(--text-2)]">🏦 Ví Chuyển khoản</span>
         <span class="font-semibold tabular-nums">${disp(bal.bank)}</span>
       </div>
     </section>
@@ -1230,7 +1399,10 @@ function renderHome() {
 
 function txItemHTML(t) {
   const isDraft = t.status === 'draft';
-  const icon = catIcon(t.category);
+  const isAdj = !!t.isAdjustment || t.category === 'adjust';
+  const w = t.wallet || t.account || 'cash';
+  const walletTag = w === 'cash' ? '💵 Tiền mặt' : '🏦 CK';
+  const icon = isAdj ? '⚖️' : catIcon(t.category);
   const sign = t.type === 'in' ? '+' : '−';
   const color = t.type === 'in' ? 'var(--income)' : 'var(--expense)';
   return `<li class="${isDraft ? 'bg-[var(--draft-bg)]' : ''}">
@@ -1240,8 +1412,9 @@ function txItemHTML(t) {
         <span class="flex items-center gap-2">
           <span class="truncate text-[15px] font-medium">${escapeHtml(t.note || t.categoryName)}</span>
           ${isDraft ? `<span class="rounded-md bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--accent)]">Nháp</span>` : ''}
+          ${isAdj ? `<span class="rounded-md bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--warn)]">Điều chỉnh</span>` : ''}
         </span>
-        <span class="block text-[12px] text-[var(--text-3)]">${formatDateVN(t.date)} · ${escapeHtml(t.categoryName)}</span>
+        <span class="block text-[12px] text-[var(--text-3)]">${formatDateVN(t.date)} · ${walletTag} · ${escapeHtml(t.categoryName)}</span>
       </span>
       <span class="shrink-0 text-[15px] font-semibold tabular-nums" style="color:${color}">${sign}${fmt(t.amount)}</span>
     </button>
@@ -1256,7 +1429,7 @@ const ledgerFilter = { type: 'all', account: 'all', month: 'current', q: '' };
 function getFilteredLedger() {
   let list = DB.transactions.slice().sort((a, b) => b.createdAt - a.createdAt);
   if (ledgerFilter.type !== 'all') list = list.filter(t => t.type === ledgerFilter.type);
-  if (ledgerFilter.account !== 'all') list = list.filter(t => t.account === ledgerFilter.account);
+  if (ledgerFilter.account !== 'all') list = list.filter(t => (t.wallet || t.account) === ledgerFilter.account);
   if (ledgerFilter.month === 'current') list = list.filter(t => isThisMonth(t.date));
   if (ledgerFilter.q) {
     const q = ledgerFilter.q.toLowerCase();
@@ -1304,7 +1477,7 @@ function renderLedger() {
       <div class="mt-3 flex flex-wrap gap-1.5">
         ${chip('type', 'all', 'Tất cả')}${chip('type', 'in', 'Thu')}${chip('type', 'out', 'Chi')}
         <span class="w-px bg-[var(--border)] mx-1"></span>
-        ${chip('account', 'all', 'Mọi nguồn')}${chip('account', 'cash', '💵 Tiền mặt')}${chip('account', 'bank', '🏦 Tài khoản')}
+        ${chip('account', 'all', 'Mọi ví')}${chip('account', 'cash', '💵 Tiền mặt')}${chip('account', 'bank', '🏦 Chuyển khoản')}
         <span class="w-px bg-[var(--border)] mx-1"></span>
         ${chip('month', 'current', 'Tháng này')}${chip('month', 'all', 'Tất cả')}
       </div>
@@ -1334,93 +1507,178 @@ function chip(group, val, label) {
 }
 
 /* ============================================================
-   10. VIEW: CHECK
+   10. VIEW: CHECK (KIỂM ĐẾM TÁCH 2 VÍ + PHIẾU ĐIỀU CHỈNH LỆCH SỔ)
 ============================================================ */
-const checkState = { mode: 'direct', actual: 0, denoms: {}, note: '', editing: false };
+const checkState = {
+  mode: 'direct',
+  actualCash: null,
+  actualBank: null,
+  denoms: {},
+  noteCash: '',
+  noteBank: '',
+  editing: false
+};
 
 function renderCheck() {
   const todayCheck = getTodayCheck();
   if (todayCheck && !checkState.editing) return checkResultHTML(todayCheck) + checkHistoryHTML();
-  return checkFormHTML(balance().cash, todayCheck) + checkHistoryHTML();
+  return checkFormHTML(balance(), todayCheck) + checkHistoryHTML();
 }
 
 function checkResultHTML(c) {
-  const ok = c.diff === 0;
+  const diffCash = typeof c.diffCash === 'number' ? c.diffCash : (c.diff || 0);
+  const diffBank = typeof c.diffBank === 'number' ? c.diffBank : 0;
+  const bookCash = typeof c.bookCash === 'number' ? c.bookCash : (c.book || 0);
+  const actualCash = typeof c.actualCash === 'number' ? c.actualCash : (c.actual || 0);
+  const bookBank = typeof c.bookBank === 'number' ? c.bookBank : 0;
+  const actualBank = typeof c.actualBank === 'number' ? c.actualBank : 0;
+  const hasBankData = typeof c.bookBank === 'number';
+  const allOk = diffCash === 0 && diffBank === 0;
+
   return `
   <section class="card p-5 mb-4">
     <div class="flex items-start gap-3">
       <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[20px]
-                     ${ok ? 'bg-[var(--accent-soft)]' : 'bg-[var(--surface-2)]'}">${ok ? '✅' : '⚠️'}</span>
+                     ${allOk ? 'bg-[var(--accent-soft)]' : 'bg-[var(--surface-2)]'}">${allOk ? '✅' : '⚖️'}</span>
       <div class="min-w-0">
-        <p class="text-[16px] font-semibold leading-tight">${ok ? 'Đã kiểm đếm · Khớp' : 'Đã kiểm đếm · Có lệch'}</p>
+        <p class="text-[16px] font-semibold leading-tight">${allOk ? 'Đã kiểm đếm · Khớp cả 2 ví' : 'Đã kiểm đếm · Đã cân bằng lệch sổ'}</p>
         <p class="text-[12px] text-[var(--text-3)]">Hôm nay · ${new Date(c.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})}</p>
       </div>
     </div>
-    <div class="mt-4 space-y-2 text-[15px]">
-      <div class="flex justify-between"><span class="text-[var(--text-2)]">Sổ sách</span><span class="font-semibold tabular-nums">${fmtMoney(c.book)}</span></div>
-      <div class="flex justify-between"><span class="text-[var(--text-2)]">Thực tế</span><span class="font-semibold tabular-nums">${fmtMoney(c.actual)}</span></div>
-      <div class="my-2 h-px bg-[var(--border)]"></div>
-      <div class="flex justify-between">
-        <span class="text-[var(--text-2)]">Chênh lệch</span>
-        <span class="font-semibold tabular-nums ${ok ? 'text-[var(--income)]' : 'text-[var(--warn)]'}">
-          ${ok ? '0đ ✓' : fmtDiff(c.diff)}
+
+    <div class="mt-4 rounded-xl bg-[var(--surface-2)] p-3.5 space-y-1.5 text-[14px]">
+      <div class="flex items-center justify-between font-semibold">
+        <span>💵 Ví Tiền mặt</span>
+        <span class="tabular-nums ${diffCash === 0 ? 'text-[var(--income)]' : 'text-[var(--warn)]'}">
+          ${diffCash === 0 ? '0đ ✓ Khớp' : `${fmtDiff(diffCash)} (đã tạo phiếu điều chỉnh)`}
         </span>
       </div>
+      <div class="flex justify-between text-[13px] text-[var(--text-2)]">
+        <span>Trên sổ: ${fmtMoney(bookCash)}</span>
+        <span>Thực giữ: ${fmtMoney(actualCash)}</span>
+      </div>
+      ${c.noteCash || c.note ? `<p class="pt-1 text-[12px] text-[var(--text-2)]">Lý do: ${escapeHtml(c.noteCash || c.note)}</p>` : ''}
     </div>
-    ${c.note ? `<div class="mt-3 rounded-lg bg-[var(--surface-2)] p-2.5 text-[13px] leading-relaxed"><span class="text-[var(--text-3)]">Giải trình: </span>${escapeHtml(c.note)}</div>` : ''}
-    <button data-act="edit-check" class="press mt-4 w-full rounded-xl border border-[var(--border)] py-2.5 text-[14px] font-medium">Sửa lại</button>
+
+    ${hasBankData ? `
+    <div class="mt-2.5 rounded-xl bg-[var(--surface-2)] p-3.5 space-y-1.5 text-[14px]">
+      <div class="flex items-center justify-between font-semibold">
+        <span>🏦 Ví Chuyển khoản</span>
+        <span class="tabular-nums ${diffBank === 0 ? 'text-[var(--income)]' : 'text-[var(--warn)]'}">
+          ${diffBank === 0 ? '0đ ✓ Khớp' : `${fmtDiff(diffBank)} (đã tạo phiếu điều chỉnh)`}
+        </span>
+      </div>
+      <div class="flex justify-between text-[13px] text-[var(--text-2)]">
+        <span>Trên sổ: ${fmtMoney(bookBank)}</span>
+        <span>Số dư bank: ${fmtMoney(actualBank)}</span>
+      </div>
+      ${c.noteBank ? `<p class="pt-1 text-[12px] text-[var(--text-2)]">Lý do: ${escapeHtml(c.noteBank)}</p>` : ''}
+    </div>` : ''}
+
+    <button data-act="edit-check" class="press mt-4 w-full rounded-xl border border-[var(--border)] py-2.5 text-[14px] font-medium">Kiểm đếm lại</button>
   </section>`;
 }
 
-function checkFormHTML(bookCash, existing) {
+function checkFormHTML(bal, existing) {
   if (existing && checkState.editing) {
-    checkState.actual = existing.actual;
+    checkState.actualCash = typeof existing.actualCash === 'number' ? existing.actualCash : existing.actual;
+    checkState.actualBank = typeof existing.actualBank === 'number' ? existing.actualBank : bal.bank;
     checkState.mode = existing.mode || 'direct';
     checkState.denoms = existing.denominations || {};
-    checkState.note = existing.note || '';
+    checkState.noteCash = existing.noteCash || existing.note || '';
+    checkState.noteBank = existing.noteBank || '';
   }
   return `
   <section class="card p-5 mb-4">
-    <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Đối soát hôm nay</p>
-    <p class="mt-1 text-[13px] text-[var(--text-2)]">Số dư tiền mặt theo sổ</p>
-    <p class="mt-0.5 text-[30px] font-bold leading-tight tabular-nums">${fmtMoney(bookCash)}</p>
-    <div class="my-4 h-px bg-[var(--border)]"></div>
+    <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Đối soát 2 ví độc lập</p>
+    <p class="mt-1 text-[13px] text-[var(--text-2)]">Nếu có chênh lệch, hệ thống sẽ tự sinh phiếu <b>Điều chỉnh kiểm kê</b> để cân bằng lại sổ mà vẫn giữ nguyên lịch sử thu/chi.</p>
 
-    <div class="grid grid-cols-2 gap-1 rounded-xl bg-[var(--surface-2)] p-1">
-      <button data-check-mode="direct" class="check-mode-btn press rounded-lg py-2 text-[13px] font-medium">Nhập trực tiếp</button>
-      <button data-check-mode="denoms" class="check-mode-btn press rounded-lg py-2 text-[13px] font-medium">Đếm mệnh giá</button>
-    </div>
-
-    <div id="checkDirectWrap" class="mt-4 relative">
-      <p class="text-[12px] text-[var(--text-3)]">Số tiền mặt đếm được</p>
-      <div class="mt-1 flex items-end gap-2">
-        <input id="checkActual" type="number" inputmode="numeric" autocomplete="off" placeholder="0"
-          value="${checkState.actual || ''}"
-          class="min-w-0 flex-1 bg-transparent text-[32px] font-bold leading-none tabular-nums outline-none placeholder:text-[var(--text-3)]"
-          style="caret-color: var(--accent)" />
-        <span class="pb-1 text-[20px] font-medium text-[var(--text-2)]">đ</span>
+    <!-- VÍ 1: TIỀN MẶT -->
+    <div class="mt-4 rounded-2xl border border-[var(--border)] p-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-[14px] font-semibold">💵 Tiền mặt thực giữ</p>
+          <p class="text-[12px] text-[var(--text-3)]">Trên sổ: <strong class="tabular-nums text-[var(--text)]">${fmtMoney(bal.cash)}</strong></p>
+        </div>
+        <button type="button" id="matchCashBtn" class="press rounded-lg bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[var(--accent)]">
+          Khớp sổ (${fmt(bal.cash)}đ)
+        </button>
       </div>
-      <p id="checkFormatted" class="absolute top-0 right-0 text-[15px] font-bold text-[var(--income)]"></p>
-    </div>
 
-    <div id="checkDenomsWrap" class="mt-4 hidden"></div>
+      <div class="mt-3 grid grid-cols-2 gap-1 rounded-xl bg-[var(--surface-2)] p-1">
+        <button data-check-mode="direct" class="check-mode-btn press rounded-lg py-1.5 text-[12px] font-medium">Nhập trực tiếp</button>
+        <button data-check-mode="denoms" class="check-mode-btn press rounded-lg py-1.5 text-[12px] font-medium">Đếm mệnh giá</button>
+      </div>
 
-    <div class="mt-4 rounded-xl bg-[var(--surface-2)] p-3">
-      <div class="flex items-center justify-between text-[14px]">
-        <span class="text-[var(--text-2)]">Chênh lệch</span>
-        <span id="checkDiff" class="font-semibold tabular-nums">—</span>
+      <div id="checkDirectWrap" class="mt-3 relative">
+        <div class="flex items-end gap-2">
+          <input id="checkActualCash" type="number" min="0" inputmode="numeric" autocomplete="off" placeholder="Nhập số tiền mặt..."
+            value="${checkState.actualCash !== null ? checkState.actualCash : ''}"
+            class="min-w-0 flex-1 bg-transparent text-[28px] font-bold leading-none tabular-nums outline-none placeholder:text-[var(--text-3)] placeholder:text-[18px] placeholder:font-normal"
+            style="caret-color: var(--accent)" />
+          <span class="pb-1 text-[18px] font-medium text-[var(--text-2)]">đ</span>
+        </div>
+        <p id="checkCashFormatted" class="mt-1 text-[12px] font-semibold text-[var(--income)]"></p>
+      </div>
+
+      <div id="checkDenomsWrap" class="mt-3 hidden"></div>
+
+      <div class="mt-3 flex items-center justify-between rounded-xl bg-[var(--surface-2)] px-3 py-2 text-[13px]">
+        <span class="text-[var(--text-2)]">Độ lệch Tiền mặt (Δ<sub>cash</sub>)</span>
+        <span id="checkDiffCash" class="font-semibold tabular-nums">Chưa nhập</span>
+      </div>
+
+      <div id="checkNoteCashWrap" class="mt-3 hidden">
+        <label class="text-[12px] font-medium text-[var(--warn)]">Lý do lệch Tiền mặt (bắt buộc) *</label>
+        <textarea id="checkNoteCash" rows="2" placeholder="VD: Thiếu 20k do mua giấy in chưa ghi sổ"
+          class="mt-1 w-full resize-none rounded-xl border border-[var(--warn)] bg-[var(--surface)] px-3 py-2 text-[13px] outline-none placeholder:text-[var(--text-3)]"
+        >${escapeHtml(checkState.noteCash)}</textarea>
+        <div class="mt-1.5 flex flex-wrap gap-1.5">
+          ${['Chưa ghi khoản chi','Thối nhầm tiền','Chưa thu đủ'].map(q =>
+            `<button type="button" data-quick-note-cash="${q}" class="press rounded-lg bg-[var(--surface-2)] px-2.5 py-1 text-[11px]">${q}</button>`
+          ).join('')}
+        </div>
       </div>
     </div>
 
-    <div id="checkNoteWrap" class="mt-3 hidden">
-      <p class="text-[12px] text-[var(--text-3)]">Giải trình chênh lệch <span class="text-[var(--warn)]">*</span></p>
-      <textarea id="checkNote" rows="2" placeholder="VD: Chưa kịp ghi khoản chi photo 20k"
-        class="mt-1.5 w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[14px] outline-none placeholder:text-[var(--text-3)]"
-      >${escapeHtml(checkState.note)}</textarea>
-      <div class="mt-1.5 flex flex-wrap gap-1.5">
-        ${['Chưa ghi khoản chi','Thối nhầm tiền','Chưa thu đủ'].map(q =>
-          `<button data-quick-note="${q}" class="quick-note press rounded-lg bg-[var(--surface-2)] px-2.5 py-1 text-[12px]">${q}</button>`
-        ).join('')}
+    <!-- VÍ 2: CHUYỂN KHOẢN / NGÂN HÀNG -->
+    <div class="mt-4 rounded-2xl border border-[var(--border)] p-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-[14px] font-semibold">🏦 Số dư ngân hàng thực tế</p>
+          <p class="text-[12px] text-[var(--text-3)]">Trên sổ: <strong class="tabular-nums text-[var(--text)]">${fmtMoney(bal.bank)}</strong></p>
+        </div>
+        <button type="button" id="matchBankBtn" class="press rounded-lg bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[var(--accent)]">
+          Khớp sổ (${fmt(bal.bank)}đ)
+        </button>
+      </div>
+
+      <div class="mt-3 relative">
+        <div class="flex items-end gap-2">
+          <input id="checkActualBank" type="number" min="0" inputmode="numeric" autocomplete="off" placeholder="Nhập số dư app ngân hàng..."
+            value="${checkState.actualBank !== null ? checkState.actualBank : ''}"
+            class="min-w-0 flex-1 bg-transparent text-[28px] font-bold leading-none tabular-nums outline-none placeholder:text-[var(--text-3)] placeholder:text-[18px] placeholder:font-normal"
+            style="caret-color: var(--accent)" />
+          <span class="pb-1 text-[18px] font-medium text-[var(--text-2)]">đ</span>
+        </div>
+        <p id="checkBankFormatted" class="mt-1 text-[12px] font-semibold text-[var(--income)]"></p>
+      </div>
+
+      <div class="mt-3 flex items-center justify-between rounded-xl bg-[var(--surface-2)] px-3 py-2 text-[13px]">
+        <span class="text-[var(--text-2)]">Độ lệch Chuyển khoản (Δ<sub>bank</sub>)</span>
+        <span id="checkDiffBank" class="font-semibold tabular-nums">Chưa nhập</span>
+      </div>
+
+      <div id="checkNoteBankWrap" class="mt-3 hidden">
+        <label class="text-[12px] font-medium text-[var(--warn)]">Lý do lệch Chuyển khoản (bắt buộc) *</label>
+        <textarea id="checkNoteBank" rows="2" placeholder="VD: Phí duy trì thẻ / bạn chuyển khoản chưa bấm duyệt"
+          class="mt-1 w-full resize-none rounded-xl border border-[var(--warn)] bg-[var(--surface)] px-3 py-2 text-[13px] outline-none placeholder:text-[var(--text-3)]"
+        >${escapeHtml(checkState.noteBank)}</textarea>
+        <div class="mt-1.5 flex flex-wrap gap-1.5">
+          ${['Phí ngân hàng / SMS','Bạn CK chưa ghi nhận','Chuyển nhầm / hoàn tiền'].map(q =>
+            `<button type="button" data-quick-note-bank="${q}" class="press rounded-lg bg-[var(--surface-2)] px-2.5 py-1 text-[11px]">${q}</button>`
+          ).join('')}
+        </div>
       </div>
     </div>
 
@@ -1444,7 +1702,7 @@ function renderCheckDenoms() {
       }).join('')}
     </div>
     <div class="mt-3 flex items-center justify-between border-t border-[var(--border)] pt-3">
-      <span class="text-[13px] font-medium">Tổng cộng</span>
+      <span class="text-[13px] font-medium">Tổng tiền mặt đếm được</span>
       <span id="checkDenomTotal" class="text-[16px] font-bold tabular-nums">${fmt(computeDenomTotal())}đ</span>
     </div>`;
   $$('[data-denom]', wrap).forEach(inp => {
@@ -1452,9 +1710,9 @@ function renderCheckDenoms() {
       const d = parseInt(inp.dataset.denom, 10);
       const c = Math.max(0, parseInt(inp.value, 10) || 0);
       checkState.denoms[d] = c;
-      checkState.actual = computeDenomTotal();
+      checkState.actualCash = computeDenomTotal();
       $(`[data-subtotal="${d}"]`, wrap).textContent = fmt(c * d) + 'đ';
-      $('#checkDenomTotal', wrap).textContent = fmt(checkState.actual) + 'đ';
+      $('#checkDenomTotal', wrap).textContent = fmt(checkState.actualCash) + 'đ';
       updateCheckDiff();
     };
   });
@@ -1462,37 +1720,71 @@ function renderCheckDenoms() {
 function computeDenomTotal() { return DENOMS.reduce((s, d) => s + (checkState.denoms[d] || 0) * d, 0); }
 
 function updateCheckDiff() {
-  const bookCash = balance().cash;
-  const diff = checkState.actual - bookCash;
-  const diffEl = $('#checkDiff');
-  const noteWrap = $('#checkNoteWrap');
-  const btn = $('#checkSaveBtn');
-  if (!diffEl || !btn) return;
+  const bal = balance();
+  const hasCash = checkState.actualCash !== null && !Number.isNaN(checkState.actualCash);
+  const hasBank = checkState.actualBank !== null && !Number.isNaN(checkState.actualBank);
 
-  if (checkState.actual === 0) {
-    diffEl.textContent = 'Chưa nhập';
-    diffEl.className = 'font-semibold tabular-nums text-[var(--text-3)]';
-    noteWrap.classList.add('hidden');
-  } else if (diff === 0) {
-    diffEl.textContent = '0đ ✓ Khớp';
-    diffEl.className = 'font-semibold tabular-nums text-[var(--income)]';
-    noteWrap.classList.add('hidden');
-  } else {
-    diffEl.textContent = fmtDiff(diff) + (diff > 0 ? ' (thừa)' : ' (thiếu)');
-    diffEl.className = 'font-semibold tabular-nums text-[var(--warn)]';
-    noteWrap.classList.remove('hidden');
+  const diffCash = hasCash ? (checkState.actualCash - bal.cash) : 0;
+  const diffBank = hasBank ? (checkState.actualBank - bal.bank) : 0;
+
+  const diffCashEl = $('#checkDiffCash');
+  const noteCashWrap = $('#checkNoteCashWrap');
+  if (diffCashEl && noteCashWrap) {
+    if (!hasCash) {
+      diffCashEl.textContent = 'Chưa nhập';
+      diffCashEl.className = 'font-semibold tabular-nums text-[var(--text-3)]';
+      noteCashWrap.classList.add('hidden');
+    } else if (diffCash === 0) {
+      diffCashEl.textContent = '0đ ✓ Khớp';
+      diffCashEl.className = 'font-semibold tabular-nums text-[var(--income)]';
+      noteCashWrap.classList.add('hidden');
+    } else {
+      diffCashEl.textContent = fmtDiff(diffCash) + (diffCash > 0 ? ' (thừa)' : ' (thiếu)');
+      diffCashEl.className = 'font-semibold tabular-nums text-[var(--warn)]';
+      noteCashWrap.classList.remove('hidden');
+    }
   }
-  const hasActual = checkState.actual > 0;
-  const needNote = diff !== 0 && hasActual;
-  const hasNote = (checkState.note || '').trim().length > 0;
-  const canSave = hasActual && (!needNote || hasNote);
+
+  const diffBankEl = $('#checkDiffBank');
+  const noteBankWrap = $('#checkNoteBankWrap');
+  if (diffBankEl && noteBankWrap) {
+    if (!hasBank) {
+      diffBankEl.textContent = 'Chưa nhập';
+      diffBankEl.className = 'font-semibold tabular-nums text-[var(--text-3)]';
+      noteBankWrap.classList.add('hidden');
+    } else if (diffBank === 0) {
+      diffBankEl.textContent = '0đ ✓ Khớp';
+      diffBankEl.className = 'font-semibold tabular-nums text-[var(--income)]';
+      noteBankWrap.classList.add('hidden');
+    } else {
+      diffBankEl.textContent = fmtDiff(diffBank) + (diffBank > 0 ? ' (thừa)' : ' (thiếu)');
+      diffBankEl.className = 'font-semibold tabular-nums text-[var(--warn)]';
+      noteBankWrap.classList.remove('hidden');
+    }
+  }
+
+  const btn = $('#checkSaveBtn');
+  if (!btn) return;
+  const needNoteCash = hasCash && diffCash !== 0;
+  const needNoteBank = hasBank && diffBank !== 0;
+  const okCashNote = !needNoteCash || (checkState.noteCash || '').trim().length > 0;
+  const okBankNote = !needNoteBank || (checkState.noteBank || '').trim().length > 0;
+  const isAnyDiff = (hasCash && diffCash !== 0) || (hasBank && diffBank !== 0);
+  const canSave = hasCash && hasBank && okCashNote && okBankNote;
 
   btn.disabled = !canSave;
   btn.classList.toggle('opacity-40', !canSave);
   btn.classList.toggle('pointer-events-none', !canSave);
-  btn.textContent = !hasActual ? 'Nhập số tiền'
-                    : (needNote && !hasNote) ? 'Cần giải trình chênh lệch'
-                    : 'Xác nhận kiểm đếm';
+
+  if (!hasCash || !hasBank) {
+    btn.textContent = 'Nhập đủ Tiền mặt & Ngân hàng';
+  } else if (!okCashNote || !okBankNote) {
+    btn.textContent = 'Nhập lý do lệch để Cân bằng sổ';
+  } else if (isAnyDiff) {
+    btn.textContent = '⚖️ Cân bằng sổ';
+  } else {
+    btn.textContent = '✓ Xác nhận khớp sổ';
+  }
 }
 
 function checkHistoryHTML() {
@@ -1507,16 +1799,27 @@ function checkHistoryHTML() {
       ? `<p class="px-4 py-6 text-center text-[13px] text-[var(--text-3)]">Chưa có lần kiểm đếm nào</p>`
       : `<ul class="divide-y divide-[var(--border)]">
         ${items.map(item => {
-          const ok = item.diff === 0;
-          return `<li class="flex items-center gap-3 px-4 py-3">
-            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-base ${ok ? 'bg-[var(--accent-soft)]' : 'bg-[var(--surface-2)]'}">${ok ? '✅' : '⚠️'}</span>
+          const dCash = typeof item.diffCash === 'number' ? item.diffCash : (item.diff || 0);
+          const dBank = typeof item.diffBank === 'number' ? item.diffBank : 0;
+          const ok = dCash === 0 && dBank === 0;
+          const bCash = typeof item.bookCash === 'number' ? item.bookCash : (item.book || 0);
+          const aCash = typeof item.actualCash === 'number' ? item.actualCash : (item.actual || 0);
+          const hasBank = typeof item.bookBank === 'number';
+          return `<li class="flex items-start gap-3 px-4 py-3">
+            <span class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-base ${ok ? 'bg-[var(--accent-soft)]' : 'bg-[var(--surface-2)]'}">${ok ? '✅' : '⚖️'}</span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center justify-between gap-2">
                 <p class="text-[14px] font-medium">${formatDateVN(item.date)}</p>
-                <p class="shrink-0 text-[13px] font-semibold tabular-nums ${ok ? 'text-[var(--income)]' : 'text-[var(--warn)]'}">${ok ? 'Khớp' : fmtDiff(item.diff)}</p>
+                <p class="shrink-0 text-[12px] font-semibold tabular-nums ${ok ? 'text-[var(--income)]' : 'text-[var(--warn)]'}">
+                  ${ok ? 'Khớp cả 2 ví' : `TM: ${dCash === 0 ? 'Khớp' : fmtDiff(dCash)}${hasBank ? ` · CK: ${dBank === 0 ? 'Khớp' : fmtDiff(dBank)}` : ''}`}
+                </p>
               </div>
-              <p class="mt-0.5 text-[12px] tabular-nums text-[var(--text-3)]">Sổ ${fmt(item.book)}đ · Thực tế ${fmt(item.actual)}đ</p>
-              ${item.note ? `<p class="mt-0.5 truncate text-[12px] text-[var(--text-3)]">${escapeHtml(item.note)}</p>` : ''}
+              <p class="mt-0.5 text-[12px] tabular-nums text-[var(--text-3)]">
+                💵 Sổ ${fmt(bCash)}đ · Thực ${fmt(aCash)}đ
+                ${hasBank ? ` | 🏦 Sổ ${fmt(item.bookBank)}đ · Thực ${fmt(item.actualBank)}đ` : ''}
+              </p>
+              ${(item.noteCash || item.note) ? `<p class="mt-0.5 truncate text-[12px] text-[var(--text-3)]">TM: ${escapeHtml(item.noteCash || item.note)}</p>` : ''}
+              ${item.noteBank ? `<p class="mt-0.5 truncate text-[12px] text-[var(--text-3)]">CK: ${escapeHtml(item.noteBank)}</p>` : ''}
             </div>
           </li>`;
         }).join('')}
@@ -1581,15 +1884,18 @@ function renderReports() {
         </section>
       </div>`}
 
-    <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <button data-act="export-xlsx" class="press w-full rounded-xl bg-[var(--accent)] py-3 text-[13px] font-semibold text-[var(--on-accent)]">
+        📊 Xuất Excel (.xlsx) ${DB.transactions.length ? `(${DB.transactions.length})` : ''}
+      </button>
       <button data-act="export-csv" class="press w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] py-3 text-[13px] font-medium">
         📥 Xuất CSV ${DB.transactions.length ? `(${DB.transactions.length})` : ''}
       </button>
       <button data-act="export-json" class="press w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] py-3 text-[13px] font-medium">
-        💾 Sao lưu JSON
+        💾 Sao lưu (.json)
       </button>
       <button data-act="import-json" class="press w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] py-3 text-[13px] font-medium">
-        📂 Khôi phục JSON
+        📂 Khôi phục (.json)
       </button>
       <input id="restoreJsonInput" type="file" accept="application/json,.json" />
     </div>
@@ -1656,6 +1962,7 @@ function renderSettings() {
   const currentBankCode = (bank.bankCode || 'BIDV').toUpperCase();
   const isPreset = BANK_OPTIONS.some(b => b.code === currentBankCode);
   const viewOnlyUrl = `${location.origin}${location.pathname}?room=${encodeURIComponent(getRoomId())}&view=1`;
+  const fbUid = firebaseAuthUser ? firebaseAuthUser.uid : '';
 
   return `
   <div class="space-y-4">
@@ -1671,6 +1978,31 @@ function renderSettings() {
       <button data-act="logout" class="press mt-3 w-full rounded-lg border border-[var(--border)] py-2.5 text-[13px] font-medium">
         Đăng xuất
       </button>
+    </section>
+
+    <section class="card p-4 space-y-2.5">
+      <p class="text-[11px] uppercase tracking-[0.12em] text-[var(--text-3)]">Xác thực Thủ quỹ Firebase (Chống sửa qua F12)</p>
+      ${fbUid ? `
+        <div class="rounded-xl bg-[var(--accent-soft)] p-3 text-[12px] space-y-1.5">
+          <p class="font-semibold text-[var(--income)]">🟢 Đã xác thực Thủ quỹ trên Firebase Auth</p>
+          <p class="text-[var(--text-2)] break-all">UID của bạn: <code class="font-mono font-bold text-[var(--text)]">${escapeHtml(fbUid)}</code></p>
+          <div class="flex gap-2 pt-1">
+            <button type="button" data-copy-view-link="${escapeHtml(fbUid)}" class="press flex-1 rounded-lg bg-[var(--accent)] py-1.5 text-[12px] font-semibold text-[var(--on-accent)]">📋 Copy UID dán vào Rules</button>
+            <button type="button" id="fbAuthSignOutBtn" class="press rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-[12px]">Thoát Auth</button>
+          </div>
+        </div>
+      ` : `
+        <p class="text-[12px] text-[var(--text-2)]">Đăng nhập bằng tài khoản Firebase Auth của Thủ quỹ để có quyền ghi dữ liệu lên server khi bật Security Rules:</p>
+        <div class="space-y-2">
+          <input id="fbAdminEmail" type="email" placeholder="Email thủ quỹ (VD: thuquy@lop.vn)"
+            class="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[13px] outline-none" />
+          <input id="fbAdminPass" type="password" placeholder="Mật khẩu Firebase Auth"
+            class="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-[13px] outline-none" />
+          <button type="button" id="fbAuthSignInBtn" class="press w-full rounded-lg bg-[var(--accent)] py-2 text-[13px] font-semibold text-[var(--on-accent)]">
+            🔐 Đăng nhập Thủ quỹ Firebase
+          </button>
+        </div>
+      `}
     </section>
 
     <section class="card p-4">
@@ -1779,14 +2111,15 @@ function renderSettings() {
     </section>
 
     <section class="card p-4 space-y-2">
-      <p class="text-[11px] uppercase tracking-[0.12em] text-[var(--text-3)] mb-1">Dữ liệu</p>
+      <p class="text-[11px] uppercase tracking-[0.12em] text-[var(--text-3)] mb-1">Dữ liệu & Sao lưu</p>
+      <button data-act="export-xlsx" class="press w-full rounded-lg bg-[var(--accent)] py-2.5 text-[13px] font-semibold text-[var(--on-accent)]">📊 Xuất Excel (.xlsx)</button>
       <button data-act="export-csv" class="press w-full rounded-lg border border-[var(--border)] py-2.5 text-[13px] font-medium">📥 Xuất CSV</button>
-      <button data-act="export-json" class="press w-full rounded-lg border border-[var(--border)] py-2.5 text-[13px] font-medium">💾 Sao lưu JSON</button>
-      <button data-act="import-json" class="press w-full rounded-lg border border-[var(--border)] py-2.5 text-[13px] font-medium">📂 Khôi phục JSON</button>
+      <button data-act="export-json" class="press w-full rounded-lg border border-[var(--border)] py-2.5 text-[13px] font-medium">💾 Sao lưu (.json)</button>
+      <button data-act="import-json" class="press w-full rounded-lg border border-[var(--border)] py-2.5 text-[13px] font-medium">📂 Khôi phục (.json)</button>
       <input id="restoreJsonInput" type="file" accept="application/json,.json" />
       <button data-act="clear-data" class="press w-full rounded-lg border border-[var(--border)] py-2.5 text-[13px] font-medium">🔄 Xoá toàn bộ dữ liệu (bắt đầu lại)</button>
       <button data-act="delete-account" class="press w-full rounded-lg border border-[var(--warn)] py-2.5 text-[13px] font-medium text-[var(--warn)]">🗑️ Xoá tài khoản</button>
-      <p class="pt-2 text-center text-[11px] text-[var(--text-3)]">Lưu cục bộ + đồng bộ đám mây qua Firebase (so-quy-lop)</p>
+      <p class="pt-2 text-center text-[11px] text-[var(--text-3)]">Lưu cục bộ PWA + đồng bộ đám mây qua Firebase (so-quy-lop)</p>
     </section>
   </div>`;
 }
@@ -1802,6 +2135,34 @@ function wireView() {
     search.oninput = (e) => {
       ledgerFilter.q = e.target.value;
       renderLedgerContent();
+    };
+  }
+
+  const fbSignInBtn = $('#fbAuthSignInBtn');
+  if (fbSignInBtn) {
+    fbSignInBtn.onclick = async () => {
+      ensureFirestoreInstance();
+      if (!firebaseAuth) { toast('Không tải được Firebase Auth', 'var(--warn)'); return; }
+      const email = ($('#fbAdminEmail')?.value || '').trim();
+      const pass = ($('#fbAdminPass')?.value || '').trim();
+      if (!email || !pass) { toast('Nhập Email và Mật khẩu Thủ quỹ', 'var(--warn)'); return; }
+      try {
+        const cred = await firebaseAuth.signInWithEmailAndPassword(email, pass);
+        firebaseAuthUser = cred.user;
+        toast('Đã đăng nhập Thủ quỹ Firebase ✓', 'var(--income)');
+        render();
+      } catch (err) {
+        toast('Lỗi đăng nhập Firebase: ' + (err.message || err.code), 'var(--warn)');
+      }
+    };
+  }
+  const fbSignOutBtn = $('#fbAuthSignOutBtn');
+  if (fbSignOutBtn) {
+    fbSignOutBtn.onclick = async () => {
+      if (firebaseAuth) await firebaseAuth.signOut();
+      firebaseAuthUser = null;
+      toast('Đã thoát Firebase Auth');
+      render();
     };
   }
 
@@ -1875,7 +2236,14 @@ function wireView() {
 
   const restoreInput = $('#restoreJsonInput');
   if (restoreInput) {
-    restoreInput.onchange = (e) => handleRestoreFile(e.target.files?.[0]);
+    restoreInput.onchange = (e) => handleRestoreJSON(e, (restoredData) => {
+      DB = normalizeDB(restoredData);
+      balanceHidden = !!DB.settings.hideBalance;
+      document.documentElement.dataset.theme = DB.settings.theme || 'giay-cu';
+      saveDB();
+      render();
+      toast('Đã khôi phục nguyên trạng từ file JSON', 'var(--income)');
+    });
   }
 
   if (currentView === 'check') wireCheckForm();
@@ -1896,6 +2264,8 @@ function wireView() {
 }
 
 function wireCheckForm() {
+  const bal = balance();
+
   $$('.check-mode-btn').forEach(btn => {
     btn.onclick = () => {
       checkState.mode = btn.dataset.checkMode;
@@ -1909,8 +2279,8 @@ function wireCheckForm() {
       if (checkState.mode === 'direct') {
         direct.classList.remove('hidden');
         denoms.classList.add('hidden');
-        const inp = $('#checkActual');
-        if (inp) { inp.value = checkState.actual || ''; inp.focus(); }
+        const inp = $('#checkActualCash');
+        if (inp) { inp.value = checkState.actualCash !== null ? checkState.actualCash : ''; inp.focus(); }
       } else {
         direct.classList.add('hidden');
         denoms.classList.remove('hidden');
@@ -1928,29 +2298,86 @@ function wireCheckForm() {
     renderCheckDenoms();
   }
 
-  const actualInp = $('#checkActual');
-  const checkFmtDisp = $('#checkFormatted');
-
-  if (checkState.actual) checkFmtDisp.textContent = '= ' + fmt(checkState.actual) + 'đ';
-
-  if (actualInp) {
-    actualInp.oninput = (e) => {
-      const num = Math.max(0, parseInt(e.target.value, 10) || 0);
-      checkState.actual = num;
-      checkFmtDisp.textContent = num ? ('= ' + fmt(num) + 'đ') : '';
+  const cashInp = $('#checkActualCash');
+  const cashFmtDisp = $('#checkCashFormatted');
+  if (cashFmtDisp && checkState.actualCash !== null) {
+    cashFmtDisp.textContent = '= ' + fmtMoney(checkState.actualCash);
+  }
+  if (cashInp) {
+    cashInp.oninput = (e) => {
+      const raw = e.target.value.trim();
+      if (raw === '') {
+        checkState.actualCash = null;
+        if (cashFmtDisp) cashFmtDisp.textContent = '';
+      } else {
+        const num = Math.max(0, parseInt(raw, 10) || 0);
+        checkState.actualCash = num;
+        if (cashFmtDisp) cashFmtDisp.textContent = '= ' + fmtMoney(num);
+      }
       updateCheckDiff();
     };
   }
 
-  const noteInp = $('#checkNote');
-  if (noteInp) noteInp.oninput = (e) => { checkState.note = e.target.value; updateCheckDiff(); };
-  $$('.quick-note').forEach(btn => {
+  const bankInp = $('#checkActualBank');
+  const bankFmtDisp = $('#checkBankFormatted');
+  if (bankFmtDisp && checkState.actualBank !== null) {
+    bankFmtDisp.textContent = '= ' + fmtMoney(checkState.actualBank);
+  }
+  if (bankInp) {
+    bankInp.oninput = (e) => {
+      const raw = e.target.value.trim();
+      if (raw === '') {
+        checkState.actualBank = null;
+        if (bankFmtDisp) bankFmtDisp.textContent = '';
+      } else {
+        const num = Math.max(0, parseInt(raw, 10) || 0);
+        checkState.actualBank = num;
+        if (bankFmtDisp) bankFmtDisp.textContent = '= ' + fmtMoney(num);
+      }
+      updateCheckDiff();
+    };
+  }
+
+  const matchCashBtn = $('#matchCashBtn');
+  if (matchCashBtn) {
+    matchCashBtn.onclick = () => {
+      checkState.actualCash = Math.max(0, Math.round(bal.cash));
+      if (cashInp) cashInp.value = checkState.actualCash;
+      if (cashFmtDisp) cashFmtDisp.textContent = '= ' + fmtMoney(checkState.actualCash);
+      updateCheckDiff();
+    };
+  }
+
+  const matchBankBtn = $('#matchBankBtn');
+  if (matchBankBtn) {
+    matchBankBtn.onclick = () => {
+      checkState.actualBank = Math.max(0, Math.round(bal.bank));
+      if (bankInp) bankInp.value = checkState.actualBank;
+      if (bankFmtDisp) bankFmtDisp.textContent = '= ' + fmtMoney(checkState.actualBank);
+      updateCheckDiff();
+    };
+  }
+
+  const noteCashInp = $('#checkNoteCash');
+  if (noteCashInp) noteCashInp.oninput = (e) => { checkState.noteCash = e.target.value; updateCheckDiff(); };
+  $$('[data-quick-note-cash]').forEach(btn => {
     btn.onclick = () => {
-      checkState.note = btn.dataset.quickNote;
-      if (noteInp) { noteInp.value = checkState.note; noteInp.focus(); }
+      checkState.noteCash = btn.dataset.quickNoteCash;
+      if (noteCashInp) { noteCashInp.value = checkState.noteCash; noteCashInp.focus(); }
       updateCheckDiff();
     };
   });
+
+  const noteBankInp = $('#checkNoteBank');
+  if (noteBankInp) noteBankInp.oninput = (e) => { checkState.noteBank = e.target.value; updateCheckDiff(); };
+  $$('[data-quick-note-bank]').forEach(btn => {
+    btn.onclick = () => {
+      checkState.noteBank = btn.dataset.quickNoteBank;
+      if (noteBankInp) { noteBankInp.value = checkState.noteBank; noteBankInp.focus(); }
+      updateCheckDiff();
+    };
+  });
+
   const saveBtn = $('#checkSaveBtn');
   if (saveBtn) saveBtn.onclick = saveCheck;
   updateCheckDiff();
@@ -1958,20 +2385,70 @@ function wireCheckForm() {
 
 function saveCheck() {
   if (!requirePinIfNeeded()) return;
-  const bookCash = balance().cash;
-  const diff = checkState.actual - bookCash;
+  if (checkState.actualCash === null || checkState.actualBank === null) return;
+
+  const bal = balance();
+  const bookCash = bal.cash;
+  const bookBank = bal.bank;
+  const actualCash = checkState.actualCash;
+  const actualBank = checkState.actualBank;
+  const diffCash = actualCash - bookCash;
+  const diffBank = actualBank - bookBank;
+
+  // Tạo phiếu điều chỉnh độc lập cho từng ví bị lệch (Cụm 1)
+  const adjCashTx = createReconcileTransaction('cash', bookCash, actualCash, checkState.noteCash);
+  const adjBankTx = createReconcileTransaction('bank', bookBank, actualBank, checkState.noteBank);
+
+  if (adjCashTx) DB.transactions.push(adjCashTx);
+  if (adjBankTx) DB.transactions.push(adjBankTx);
+
   const existing = getTodayCheck();
   const payload = {
-    id: existing?.id || uid(), date: todayISO(), book: bookCash, actual: checkState.actual,
-    diff, note: checkState.note, mode: checkState.mode,
+    id: existing?.id || uid(),
+    date: todayISO(),
+    book: bookCash,
+    actual: actualCash,
+    diff: diffCash + diffBank,
+    bookCash,
+    actualCash,
+    diffCash,
+    noteCash: diffCash !== 0 ? checkState.noteCash.trim() : '',
+    bookBank,
+    actualBank,
+    diffBank,
+    noteBank: diffBank !== 0 ? checkState.noteBank.trim() : '',
+    note: [
+      diffCash !== 0 ? `TM: ${checkState.noteCash.trim()}` : '',
+      diffBank !== 0 ? `CK: ${checkState.noteBank.trim()}` : ''
+    ].filter(Boolean).join(' | '),
+    mode: checkState.mode,
     denominations: checkState.mode === 'denoms' ? { ...checkState.denoms } : null,
     createdAt: Date.now(),
   };
-  if (existing) { const i = DB.cashChecks.findIndex(c => c.id === existing.id); DB.cashChecks[i] = payload; }
-  else DB.cashChecks.push(payload);
+
+  if (existing) {
+    const i = DB.cashChecks.findIndex(c => c.id === existing.id);
+    DB.cashChecks[i] = payload;
+  } else {
+    DB.cashChecks.push(payload);
+  }
+
   saveDB();
-  checkState.editing = false; checkState.actual = 0; checkState.denoms = {}; checkState.note = ''; checkState.mode = 'direct';
-  toast(diff === 0 ? 'Đã kiểm đếm · Khớp ✓' : `Đã ghi nhận lệch ${fmtDiff(diff)}`, diff === 0 ? 'var(--income)' : 'var(--warn)');
+  checkState.editing = false;
+  checkState.actualCash = null;
+  checkState.actualBank = null;
+  checkState.denoms = {};
+  checkState.noteCash = '';
+  checkState.noteBank = '';
+  checkState.mode = 'direct';
+
+  const hasAdj = !!(adjCashTx || adjBankTx);
+  toast(
+    hasAdj
+      ? '⚖️ Đã sinh phiếu điều chỉnh kiểm kê & cân bằng lại sổ!'
+      : '✓ Đã kiểm đếm · Khớp cả 2 ví!',
+    hasAdj ? 'var(--expense)' : 'var(--income)'
+  );
   render();
 }
 
@@ -2011,8 +2488,9 @@ document.addEventListener('click', (e) => {
     case 'open-inbox': if (requirePinIfNeeded()) openInboxSheet(); return;
     case 'edit-tx': if (requirePinIfNeeded()) openCaptureSheet(id); return;
     case 'edit-check': if (requirePinIfNeeded()) { checkState.editing = true; render(); } return;
+    case 'export-xlsx': exportExcel(); return;
     case 'export-csv': exportCSV(); return;
-    case 'export-json': exportBackupJSON(); return;
+    case 'export-json': exportJSONBackup(DB); return;
     case 'import-json': $('#restoreJsonInput')?.click(); return;
     case 'logout':
       doLogout();
@@ -2077,7 +2555,7 @@ function openCaptureSheet(editId = null) {
     const t = DB.transactions.find(x => x.id === editId);
     if (t) {
       sheetState.type = t.type; sheetState.amount = t.amount;
-      sheetState.category = t.category; sheetState.account = t.account;
+      sheetState.category = t.category; sheetState.account = t.wallet || t.account || 'cash';
       sheetState.date = t.date; sheetState.member = t.member || '';
       sheetState.note = t.note || ''; sheetState.receipt = t.receipt || null;
       sheetState.fromNoti = t.status === 'draft' && !t.category;
@@ -2128,10 +2606,10 @@ function renderCaptureSheet() {
         <div id="capCats" class="mt-2 flex flex-wrap gap-1.5"></div>
       </div>
       <div class="mt-5">
-        <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Nguồn tiền</p>
+        <p class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-3)]">Ví tiền (Nguồn tiền)</p>
         <div class="mt-2 grid grid-cols-2 gap-1.5">
           <button data-cap-acc="cash" class="cap-acc press rounded-xl border border-[var(--border)] py-2.5 text-[13px] font-medium">💵 Tiền mặt</button>
-          <button data-cap-acc="bank" class="cap-acc press rounded-xl border border-[var(--border)] py-2.5 text-[13px] font-medium">🏦 Tài khoản</button>
+          <button data-cap-acc="bank" class="cap-acc press rounded-xl border border-[var(--border)] py-2.5 text-[13px] font-medium">🏦 Chuyển khoản</button>
         </div>
       </div>
       <div class="mt-4 grid grid-cols-2 gap-3">
@@ -2312,7 +2790,9 @@ function saveCapture() {
     type: sheetState.type, amount: sheetState.amount,
     category: sheetState.category,
     categoryName: cat ? cat.name : 'Chưa phân loại',
-    account: sheetState.account, date: sheetState.date,
+    wallet: sheetState.account,
+    account: sheetState.account,
+    date: sheetState.date,
     member: sheetState.member, note: sheetState.note,
     receipt: sheetState.receipt,
     status: isDraft ? 'draft' : 'done',
@@ -2467,8 +2947,6 @@ function renderMembersSheet() {
       <div class="flex-1 text-center"><p class="text-[20px] font-bold tabular-nums">${stats.total}</p><p class="text-[11px] text-[var(--text-3)]">Tổng</p></div>
     </div>` : ''}
 
-
-
     ${memberFilterTab !== 'logs' && DB.members.length > 0 ? `
     <div class="mx-5 mt-2">
       <input id="memberSearchInp" type="text" placeholder="Tìm nhanh tên hoặc mã (VD: Kiên, TV05)..."
@@ -2517,7 +2995,7 @@ function renderMembersSheet() {
           </button>`).join('')}
       </div>` : ''}
 
-            ${!isGuestLocked() ? `
+      ${!isGuestLocked() ? `
       <div class="mt-4 flex gap-2">
         <input id="newMemberName" type="text" placeholder="Tên thành viên mới" maxlength="40"
           class="flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[14px] outline-none placeholder:text-[var(--text-3)]" />
@@ -2568,13 +3046,13 @@ function renderMembersSheet() {
   if (importBtn) importBtn.onclick = importMembers;
   if (copyDebtBtn) {
     copyDebtBtn.onclick = () => {
-    const unpaid = DB.members.filter(m => !isMemberPaidToday(m.id)).map(m => m.name);
-    if (DB.members.length === 0) { toast('Chưa có thành viên nào để nhắc'); return; }
-    if (unpaid.length === 0) { toast('Cả lớp đã đóng đủ 🎉', 'var(--income)'); return; }
-    const msg = `Chào cả lớp, hiện có ${unpaid.length} bạn chưa đóng quỹ (${fmtMoney(DB.settings.termFee)}/bạn): ${unpaid.join(', ')}. Các bạn sắp xếp đóng giúp mình nhé. Cảm ơn cả lớp 🌿`;
-    copyText(msg);
-  };
-}
+      const unpaid = DB.members.filter(m => !isMemberPaidToday(m.id)).map(m => m.name);
+      if (DB.members.length === 0) { toast('Chưa có thành viên nào để nhắc'); return; }
+      if (unpaid.length === 0) { toast('Cả lớp đã đóng đủ 🎉', 'var(--income)'); return; }
+      const msg = `Chào cả lớp, hiện có ${unpaid.length} bạn chưa đóng quỹ (${fmtMoney(DB.settings.termFee)}/bạn): ${unpaid.join(', ')}. Các bạn sắp xếp đóng giúp mình nhé. Cảm ơn cả lớp 🌿`;
+      copyText(msg);
+    };
+  }
 }
 
 function addMemberFromInput() {
@@ -2635,13 +3113,15 @@ function renderInboxSheet() {
             <p class="text-[14px] text-[var(--text-3)]">Không còn khoản nháp nào 🎉</p>
             <p class="mt-1 text-[12px] text-[var(--text-3)]">Sạch sẽ gọn gàng!</p>
           </div>`
-        : drafts.map(t => `
+        : drafts.map(t => {
+          const w = t.wallet || t.account || 'cash';
+          return `
           <div class="mb-3 rounded-xl border border-[var(--border)] p-3">
             <div class="flex items-center gap-2">
               <span class="text-[16px]">${catIcon(t.category)}</span>
               <div class="min-w-0 flex-1">
                 <p class="truncate text-[14px] font-medium">${escapeHtml(t.note || 'Chưa có ghi chú')}</p>
-                <p class="text-[12px] text-[var(--text-3)]">${formatDateVN(t.date)} · ${t.account === 'cash' ? '💵 Tiền mặt' : '🏦 Tài khoản'}</p>
+                <p class="text-[12px] text-[var(--text-3)]">${formatDateVN(t.date)} · ${w === 'cash' ? '💵 Tiền mặt' : '🏦 Chuyển khoản'}</p>
               </div>
               <span class="shrink-0 text-[15px] font-semibold tabular-nums ${t.type === 'in' ? 'text-[var(--income)]' : 'text-[var(--expense)]'}">
                 ${t.type === 'in' ? '+' : '−'}${fmt(t.amount)}
@@ -2654,7 +3134,8 @@ function renderInboxSheet() {
               ).join('')}
             </div>
             <button data-edit-draft="${t.id}" class="mt-2 text-[11px] font-medium text-[var(--accent)]">Sửa chi tiết →</button>
-          </div>`).join('')}
+          </div>`;
+        }).join('')}
     </div>`;
 
   $$('[data-classify]', el).forEach(btn => {
@@ -2702,8 +3183,71 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ============================================================
-   19. EXPORT CSV
+   19. EXPORT EXCEL (.XLSX OFFLINE VIA SHEETJS) & CSV
 ============================================================ */
+function exportExcel() {
+  if (typeof window.XLSX === 'undefined') {
+    toast('Thư viện Excel chưa sẵn sàng — đang xuất CSV dự phòng...', 'var(--warn)');
+    exportCSV();
+    return;
+  }
+  const bal = balance();
+  const wb = window.XLSX.utils.book_new();
+
+  // Sheet 1: Sổ giao dịch
+  const txRows = [['Ngày', 'Loại', 'Ví', 'Danh mục', 'Số tiền (đ)', 'Người nộp', 'Ghi chú', 'Loại phiếu', 'Trạng thái']];
+  DB.transactions.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach(t => {
+    const w = (t.wallet || t.account) === 'cash' ? 'Tiền mặt' : 'Chuyển khoản';
+    txRows.push([
+      t.date,
+      t.type === 'in' ? 'Thu' : 'Chi',
+      w,
+      t.categoryName || '',
+      Number(t.amount) || 0,
+      t.member || '',
+      t.note || '',
+      (t.isAdjustment || t.category === 'adjust') ? 'Điều chỉnh kiểm kê' : 'Thường',
+      t.status === 'draft' ? 'Nháp' : 'Đã ghi'
+    ]);
+  });
+  const wsTx = window.XLSX.utils.aoa_to_sheet(txRows);
+  wsTx['!cols'] = [
+    { wch: 12 }, { wch: 8 }, { wch: 15 }, { wch: 20 },
+    { wch: 15 }, { wch: 22 }, { wch: 36 }, { wch: 20 }, { wch: 12 }
+  ];
+  window.XLSX.utils.book_append_sheet(wb, wsTx, 'So_Giao_Dich');
+
+  // Sheet 2: Tổng hợp số dư 2 ví
+  const sumRows = [
+    ['Chỉ tiêu', 'Số tiền (đ)'],
+    ['Ví Tiền mặt', bal.cash],
+    ['Ví Chuyển khoản', bal.bank],
+    ['Tổng số dư quỹ lớp', bal.total],
+    ['Ngày xuất báo cáo', todayISO()]
+  ];
+  const wsSum = window.XLSX.utils.aoa_to_sheet(sumRows);
+  wsSum['!cols'] = [{ wch: 26 }, { wch: 18 }];
+  window.XLSX.utils.book_append_sheet(wb, wsSum, 'Tong_Hop_Vi');
+
+  // Sheet 3: Danh sách thành viên
+  const memRows = [['Mã TV', 'Họ và tên', 'Trạng thái hôm nay', 'Thời gian đóng']];
+  DB.members.forEach(m => {
+    const paid = isMemberPaidToday(m.id);
+    memRows.push([
+      m.code || '',
+      m.name,
+      paid ? 'Đã đóng' : 'Chưa đóng',
+      paid ? getMemberPaidLabel(m.id) : ''
+    ]);
+  });
+  const wsMem = window.XLSX.utils.aoa_to_sheet(memRows);
+  wsMem['!cols'] = [{ wch: 10 }, { wch: 26 }, { wch: 18 }, { wch: 24 }];
+  window.XLSX.utils.book_append_sheet(wb, wsMem, 'Thanh_Vien');
+
+  window.XLSX.writeFile(wb, `SoQuyLop_${todayISO()}.xlsx`);
+  toast('📊 Đã xuất file Excel (.xlsx) thành công!', 'var(--income)');
+}
+
 function exportCSV() {
   if (DB.transactions.length === 0) { toast('Chưa có giao dịch nào để xuất'); return; }
 
@@ -2712,10 +3256,11 @@ function exportCSV() {
     return /^[=+\-@]/.test(s) ? "'" + s : s;
   };
 
-  const rows = [['Ngày','Loại','Danh mục','Số tiền','Nguồn','Người nộp','Ghi chú','Trạng thái']];
+  const rows = [['Ngày','Loại','Danh mục','Số tiền','Ví','Người nộp','Ghi chú','Trạng thái']];
   DB.transactions.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach(t => {
+    const w = (t.wallet || t.account) === 'cash' ? 'Tiền mặt' : 'Chuyển khoản';
     rows.push([t.date, t.type === 'in' ? 'Thu' : 'Chi', sanitize(t.categoryName), t.amount,
-      t.account === 'cash' ? 'Tiền mặt' : 'Tài khoản', sanitize(t.member), sanitize(t.note),
+      w, sanitize(t.member), sanitize(t.note),
       t.status === 'draft' ? 'Nháp' : 'Đã ghi']);
   });
   const csvBody = rows.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(';')).join('\r\n');
@@ -2836,6 +3381,10 @@ init();
 
 function syncOnResume() {
   if (document.hidden) return;
+  if (!navigator.onLine) {
+    updateSyncBadge('offline');
+    return;
+  }
   if (isGuestLocked() || currentUser) {
     initRealtimeSync();
   }
